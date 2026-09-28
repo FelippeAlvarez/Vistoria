@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vistoria de Imóveis</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#1e293b;--muted:#64748b;--line:#dbe2ea;--pri:#1d4ed8;--danger:#b91c1c;--chip:#eef2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18202b;--ink:#e2e8f0;--muted:#94a3b8;--line:#2b3746;--pri:#3b82f6;--danger:#f87171;--chip:#223043}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:17px;margin:0}
+#status{font-size:13px;color:var(--muted)}
+main{max-width:960px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+h2{font-size:16px;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+textarea{resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.between{justify-content:space-between}
+.btn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn.primary{background:var(--pri);border-color:var(--pri);color:#fff}
+.btn.danger{color:var(--danger)}
+.toolbar{margin-bottom:16px}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tab{flex:none;font:inherit;font-size:14px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
+.tab.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+.tab.add{background:transparent;border-style:dashed}
+.badge{font-size:11px;opacity:.8}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:6px 12px;cursor:pointer}
+.painel{display:flex;flex-direction:column;gap:14px}
+.fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+figure{margin:0;position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
+figure img{width:100%;height:140px;object-fit:cover;display:block}
+figure input{border:0;border-top:1px solid var(--line);border-radius:0;font-size:13px}
+.x{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:1;cursor:pointer}
+.lista{list-style:none;margin:0;padding:0}
+.lista li{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}
+.lista small{display:block;color:var(--muted)}
+.muted{color:var(--muted)}
+h2 small{font-weight:400;font-size:13px}
+.cabecalho{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.cabecalho .grid{flex:1;min-width:240px}
+h3{font-size:14px;margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+/* endereço: rua | nº ; complemento | bairro ; cidade | UF */
+.g-end{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.g-end .c-rua{grid-column:span 5}
+.g-end .c-num{grid-column:span 1}
+.g-end .c-meio{grid-column:span 3}
+input.uf{text-transform:uppercase;text-align:center}
+/* partes: nome | CPF/CNPJ, sempre na mesma coluna */
+.g-partes{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+@media (max-width:600px){
+  .g-end{grid-template-columns:1fr 90px}
+  .g-end .c-rua{grid-column:1}
+  .g-end .c-num{grid-column:2}
+  .g-end .c-meio{grid-column:1/-1}
+  .g-partes{grid-template-columns:1fr}
+  .g-partes span{display:none}
+}
+.logo-box{width:160px;height:90px;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden}
+.logo-box img{max-width:100%;max-height:100%;object-fit:contain}
+</style>
+</head>
+<body>
+<header><h1>Vistoria de Imóveis</h1><span id="status"></span></header>
+<main id="app"></main>
+<script>
+// ---------- Armazenamento local (IndexedDB) ----------
+const DB_NAME = 'vistorias-db', STORE = 'vistorias', CONFIG = 'config';
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(CONFIG)) db.createObjectStore(CONFIG, { keyPath: 'id' });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function tx(mode, fn, store = STORE) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const req = fn(t.objectStore(store));
+    t.oncomplete = () => res(req && req.result);
+    t.onerror = () => rej(t.error);
+  });
+}
+const dbAll = () => tx('readonly', s => s.getAll());
+const dbGet = id => tx('readonly', s => s.get(id));
+const dbPut = v => tx('readwrite', s => s.put(v));
+const dbDel = id => tx('readwrite', s => s.delete(id));
+async function cfgGet() {
+  // 'imobiliaria' é a chave usada até a v03; lida apenas para não perder o logo já cadastrado
+  const c = (await tx('readonly', s => s.get('cabecalho'), CONFIG)) || (await tx('readonly', s => s.get('imobiliaria'), CONFIG));
+  return { logo: null, nome: '', contato: '', ...c, id: 'cabecalho' };
+}
+const cfgPut = c => tx('readwrite', s => s.put(c), CONFIG);
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+
+// ---------- Utilidades ----------
+const $ = s => document.querySelector(s);
+const app = $('#app');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hoje = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const fmtData = s => s ? s.split('-').reverse().join('/') : '';
+const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const extenso = s => { if (!s) return ''; const [a, m, d] = s.split('-'); return `${+d} de ${MESES[m - 1]} de ${a}`; };
+const slug = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+const TIPOS = { previa: 'Vistoria prévia (entrada)', entrega: 'Vistoria de entrega de chaves' };
+const ESTADOS = ['', 'Novo', 'Bom', 'Regular', 'Ruim'];
+const PRESETS = ['Sala', 'Cozinha', 'Quarto', 'Suíte', 'Banheiro', 'Lavabo', 'Área de serviço', 'Varanda', 'Garagem', 'Fachada / Área externa'];
+const DECLARACAO = {
+  previa: 'O(A) LOCATÁRIO(A) declara que acompanhou a vistoria do imóvel acima identificado e que o presente laudo, composto pela descrição e pelo registro fotográfico de cada cômodo, retrata fielmente o estado em que o imóvel lhe é entregue no início da locação, obrigando-se a restituí-lo, ao término da locação, no mesmo estado, salvo as deteriorações decorrentes do seu uso normal (arts. 22, V, e 23, III, da Lei nº 8.245/91).',
+  previaSemLocatario: 'A presente vistoria foi realizada sem o acompanhamento do(a) LOCATÁRIO(A). O(A) LOCATÁRIO(A) terá o prazo de 10 (dez) dias, contados do recebimento deste laudo, composto pela descrição e pelo registro fotográfico de cada cômodo, para manifestar por escrito eventual discordância quanto ao estado do imóvel nele descrito. Decorrido esse prazo sem manifestação, o laudo será considerado aceito em todos os seus termos. O(A) LOCATÁRIO(A) obriga-se a restituir o imóvel, ao término da locação, no mesmo estado em que o recebeu, conforme descrito neste laudo, salvo as deteriorações decorrentes do seu uso normal (arts. 22, V, e 23, III, da Lei nº 8.245/91).',
+  entrega: 'As partes declaram que, nesta data, o imóvel acima identificado foi devolvido e as chaves entregues, encontrando-se no estado descrito neste laudo e em seu registro fotográfico, que servirá de base para comparação com a vistoria de entrada e para a eventual apuração de responsabilidades.'
+};
+const enderecoCompleto = v => v.rua
+  ? `${v.rua}${v.numero ? ', ' + v.numero : ''}${v.complemento ? ' - ' + v.complemento : ''}${v.bairro ? ' - ' + v.bairro : ''}`
+  : (v.endereco || '');
+const cidadeUF = v => [v.cidade, v.uf].filter(Boolean).join('/');
+// vistorias criadas até a v03 tinham o endereço num campo único
+function migrar(v) {
+  if (v && v.endereco && !v.rua) { v.rua = v.endereco; }
+  if (v) delete v.endereco;
+  return v;
+}
+const semLocatario = v => v.tipo === 'previa' && v.acompanhou === 'nao';
+const declaracaoPadrao = v => semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo];
+// texto efetivo: o ajustado pelo usuário nesta vistoria ou, se não houver, o padrão da opção escolhida
+const textoDeclaracao = v => (v.declaracao || '').trim() ? v.declaracao : declaracaoPadrao(v);
+
+function flash(msg) { const s = $('#status'); s.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => s.textContent = '', 1500); }
+function baixar(blob, nome) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ---------- Estado ----------
+let cur = null, tab = 0, saveT = null;
+function novaVistoria(tipo) {
+  return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '', locatario: '', locatarioDoc: '',
+    locador: '', locadorDoc: '', vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
+    comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
+}
+const novoComodo = nome => ({ id: uid(), nome, estado: '', descricao: '', fotos: [] });
+function salvar() {
+  clearTimeout(saveT);
+  saveT = setTimeout(flush, 400);
+}
+// salva imediatamente ao minimizar, trocar de app ou fechar a página, sem esperar o intervalo
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && saveT) flush(); });
+window.addEventListener('pagehide', () => { if (saveT) flush(); });
+async function flush() {
+  clearTimeout(saveT); saveT = null;
+  if (!cur) return;
+  cur.atualizadoEm = Date.now();
+  await dbPut(cur);
+  flash('Salvo ✓');
+}
+
+// ---------- Fotos ----------
+function loadImage(file) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function comprimir(file, max = 1600, q = 0.82, tipo = 'image/jpeg') {
+  const img = await loadImage(file);
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  URL.revokeObjectURL(img.src);
+  return { data: c.toDataURL(tipo, q), w, h };
+}
+
+// ---------- Telas ----------
+async function telaLista() {
+  cur = null;
+  const all = (await dbAll()).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  const cfg = await cfgGet();
+  app.innerHTML = `
+  <section class="card">
+    <h2>Cabeçalho do laudo <small class="muted">(logo e identificação de quem elabora a vistoria; aparecem no topo de todos os PDFs)</small></h2>
+    <div class="cabecalho">
+      <div class="logo-box">${cfg.logo ? `<img src="${cfg.logo.data}" alt="Logo">` : '<span class="muted">Sem logo</span>'}</div>
+      <div class="grid">
+        <label>Nome (pessoa ou empresa)<input data-cfg="nome" value="${esc(cfg.nome)}"></label>
+        <label class="full">Contato (registro profissional, endereço, telefone, e-mail…)<textarea data-cfg="contato" rows="2">${esc(cfg.contato)}</textarea></label>
+        <div class="row full">
+          <label class="btn">🖼️ ${cfg.logo ? 'Trocar logo' : 'Enviar logo'}<input type="file" accept="image/*" data-logo hidden></label>
+          ${cfg.logo ? '<button class="btn danger" data-act="dellogo">Remover logo</button>' : ''}
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Nova vistoria</h2>
+    <div class="row">
+      <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia (entrada)</button>
+      <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega de chaves</button>
+    </div>
+  </section>
+  <section class="card">
+    <div class="row between"><h2>Vistorias salvas</h2><button class="btn" data-act="importar">Importar backup</button></div>
+    ${all.length ? `<ul class="lista">${all.map(v => `
+      <li>
+        <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
+          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)</small></div>
+        <div class="row">
+          <button class="btn" data-act="abrir" data-id="${v.id}">Abrir</button>
+          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>` : ''}
+          <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
+        </div>
+      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda.</p>'}
+  </section>`;
+}
+
+function inp(f, label, type = 'text', cls = '', attrs = '') {
+  return `<label class="${cls}">${label}<input type="${type}" data-f="${f}" value="${esc(cur[f])}" ${attrs}></label>`;
+}
+
+function telaEditor() {
+  const sy = scrollY, v = cur;
+  app.innerHTML = `
+  <div class="row between toolbar">
+    <button class="btn" data-act="voltar">← Vistorias</button>
+    <div class="row">
+      <button class="btn" data-act="backup">Backup (JSON)</button>
+      <button class="btn primary" data-act="pdf">Gerar PDF</button>
+    </div>
+  </div>
+  <section class="card">
+    <h2>Dados da vistoria</h2>
+    <div class="grid">
+      <label>Tipo<select data-f="tipo">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === v.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      ${inp('data', 'Data da vistoria', 'date')}
+      ${v.tipo === 'previa' ? `<label>O(a) locatário(a) acompanhou a vistoria?<select data-f="acompanhou">
+        <option value="sim" ${v.acompanhou !== 'nao' ? 'selected' : ''}>Sim, acompanhou</option>
+        <option value="nao" ${v.acompanhou === 'nao' ? 'selected' : ''}>Não acompanhou (prazo de 10 dias)</option>
+      </select></label>` : ''}
+      ${inp('contrato', 'Contrato / referência')}
+    </div>
+
+    <h3>Imóvel</h3>
+    <div class="g-end">
+      ${inp('rua', 'Rua / Logradouro', 'text', 'c-rua')}
+      ${inp('numero', 'Número', 'text', 'c-num', 'inputmode="numeric"')}
+      ${inp('complemento', 'Complemento', 'text', 'c-meio', 'placeholder="Apto, bloco, casa…"')}
+      ${inp('bairro', 'Bairro', 'text', 'c-meio')}
+      ${inp('cidade', 'Cidade', 'text', 'c-rua')}
+      ${inp('uf', 'UF', 'text', 'c-num', 'maxlength="2" class="uf" autocapitalize="characters"')}
+    </div>
+
+    <h3>Partes</h3>
+    <div class="g-partes">
+      ${inp('locatario', 'Locatário(a) — nome completo')}
+      ${inp('locatarioDoc', 'CPF/CNPJ do(a) locatário(a)')}
+      ${inp('locador', 'Locador(a) — nome completo')}
+      ${inp('locadorDoc', 'CPF/CNPJ do(a) locador(a)')}
+      ${inp('vistoriador', 'Vistoriador(a) — nome completo')}
+      <span></span>
+    </div>
+
+    <h3>Chaves e medidores</h3>
+    <div class="grid">
+      ${inp('chaves', 'Chaves (quantidade / descrição)')}
+      ${inp('agua', 'Leitura do hidrômetro (água)')}
+      ${inp('luz', 'Leitura do medidor de energia')}
+      ${inp('gas', 'Leitura do medidor de gás')}
+    </div>
+
+    <h3>Textos do laudo</h3>
+    <div class="grid">
+      <label class="full">Observações gerais<textarea data-f="obs" rows="3">${esc(v.obs)}</textarea></label>
+      <label class="full">Texto da declaração final (pode ser ajustado livremente nesta vistoria)
+        <textarea data-f="declaracao" rows="8">${esc(textoDeclaracao(v))}</textarea></label>
+      <div class="row full">
+        <button class="btn" data-act="restaurardecl">↺ Restaurar texto padrão</button>
+        <span class="muted" id="decl-status">${(v.declaracao || '').trim() ? 'Texto ajustado para esta vistoria.' : 'Usando o texto padrão.'}</span>
+      </div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Cômodos</h2>
+    <div class="tabs">
+      ${v.comodos.map((c, i) => `<button class="tab ${i === tab ? 'on' : ''}" data-act="tab" data-i="${i}"><span>${esc(c.nome || 'Sem nome')}</span> <span class="badge">📷${c.fotos.length}</span></button>`).join('')}
+      <button class="tab add" data-act="addmenu">+ Cômodo</button>
+    </div>
+    <div id="addmenu" class="presets" ${v.comodos.length ? 'hidden' : ''}>
+      ${PRESETS.map(p => `<button class="chip" data-act="add" data-nome="${esc(p)}">${esc(p)}</button>`).join('')}
+      <button class="chip" data-act="add" data-nome="">Outro…</button>
+    </div>
+    ${painelComodo()}
+  </section>`;
+  scrollTo(0, sy);
+}
+
+function painelComodo() {
+  const c = cur.comodos[tab];
+  if (!c) return '<p class="muted">Escolha acima o primeiro cômodo a vistoriar.</p>';
+  return `<div class="painel">
+    <div class="grid">
+      <label>Nome do cômodo<input data-cf="nome" value="${esc(c.nome)}"></label>
+      <label>Estado geral<select data-cf="estado">${ESTADOS.map(e => `<option value="${e}" ${e === c.estado ? 'selected' : ''}>${e || '—'}</option>`).join('')}</select></label>
+      <label class="full">Descrição (piso, paredes, teto, portas, janelas, instalações elétricas e hidráulicas, avarias…)
+        <textarea data-cf="descricao" rows="7">${esc(c.descricao)}</textarea></label>
+    </div>
+    <div class="row">
+      <label class="btn primary">📷 Tirar foto<input type="file" accept="image/*" capture="environment" data-file hidden></label>
+      <label class="btn">🖼️ Escolher fotos<input type="file" accept="image/*" multiple data-file hidden></label>
+      <span id="proc" class="muted"></span>
+    </div>
+    <div class="fotos">${c.fotos.map((f, i) => `
+      <figure>
+        <img src="${f.data}" alt="Foto ${i + 1}">
+        <input data-pf="${i}" placeholder="Legenda da foto ${i + 1}" value="${esc(f.legenda)}">
+        <button class="x" data-act="delfoto" data-i="${i}" title="Remover foto">×</button>
+      </figure>`).join('')}</div>
+    <div class="row between">
+      <div class="row">
+        <button class="btn" data-act="mover" data-d="-1">◀ Mover</button>
+        <button class="btn" data-act="mover" data-d="1">Mover ▶</button>
+      </div>
+      <button class="btn danger" data-act="delcomodo">Excluir cômodo</button>
+    </div>
+  </div>`;
+}
+
+// ---------- Eventos ----------
+let cfgT = null, cfgPend = {};
+app.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.cfg) {
+    cfgPend[t.dataset.cfg] = t.value;
+    clearTimeout(cfgT);
+    cfgT = setTimeout(async () => {
+      const mud = cfgPend; cfgPend = {};
+      await cfgPut(Object.assign(await cfgGet(), mud)); flash('Salvo ✓');
+    }, 400);
+    return;
+  }
+  if (!cur) return;
+  if (t.dataset.f) {
+    if (t.dataset.f === 'uf') t.value = t.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+    cur[t.dataset.f] = t.value;
+    if (t.dataset.f === 'declaracao') {
+      const s = $('#decl-status');
+      if (s) s.textContent = t.value.trim() ? 'Texto ajustado para esta vistoria.' : 'Campo vazio: será usado o texto padrão.';
+    }
+    if (t.dataset.f === 'tipo' || t.dataset.f === 'acompanhou') {
+      // o texto padrão muda com a opção; se o usuário tinha ajustado o texto, pergunta antes de trocar
+      if ((cur.declaracao || '').trim() && confirm('O texto da declaração foi ajustado nesta vistoria. Deseja substituí-lo pelo texto padrão da nova opção?')) cur.declaracao = '';
+      salvar(); return telaEditor();
+    }
+  } else if (t.dataset.cf) {
+    cur.comodos[tab][t.dataset.cf] = t.value;
+    if (t.dataset.cf === 'nome') { const s = app.querySelector('.tab.on span'); if (s) s.textContent = t.value || 'Sem nome'; }
+  } else if (t.dataset.pf) {
+    cur.comodos[tab].fotos[+t.dataset.pf].legenda = t.value;
+  } else return;
+  salvar();
+});
+
+app.addEventListener('change', async e => {
+  const t = e.target;
+  if (t.hasAttribute('data-logo') && t.files.length) {
+    try {
+      const c = await cfgGet();
+      c.logo = await comprimir(t.files[0], 800, 1, 'image/png'); // PNG preserva fundo transparente
+      await cfgPut(c); flash('Logo salvo ✓'); telaLista();
+    } catch { alert('Não foi possível ler a imagem do logo.'); }
+    return;
+  }
+  if (!t.hasAttribute('data-file') || !t.files.length) return;
+  const c = cur.comodos[tab], files = [...t.files], p = $('#proc');
+  for (let i = 0; i < files.length; i++) {
+    p.textContent = `Processando foto ${i + 1} de ${files.length}…`;
+    try {
+      const r = await comprimir(files[i]);
+      c.fotos.push({ id: uid(), legenda: '', ...r });
+    } catch { alert('Não foi possível ler o arquivo ' + files[i].name); }
+  }
+  await flush();
+  telaEditor();
+});
+
+app.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const d = b.dataset;
+  switch (d.act) {
+    case 'nova':
+      cur = novaVistoria(d.tipo); tab = 0; await dbPut(cur); telaEditor(); break;
+    case 'abrir':
+      cur = migrar(await dbGet(d.id)); tab = 0; telaEditor(); break;
+    case 'derivar': {
+      const o = migrar(await dbGet(d.id));
+      cur = novaVistoria('entrega');
+      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc', 'locador', 'locadorDoc', 'vistoriador']) cur[k] = o[k];
+      cur.comodos = o.comodos.map(c => novoComodo(c.nome));
+      tab = 0; await dbPut(cur); telaEditor(); break;
+    }
+    case 'excluir':
+      if (confirm('Excluir esta vistoria definitivamente? (faça um backup antes, se necessário)')) { await dbDel(d.id); telaLista(); }
+      break;
+    case 'importar': {
+      const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json';
+      i.onchange = async () => {
+        try {
+          const dados = JSON.parse(await i.files[0].text());
+          for (const v of [].concat(dados)) { if (v && v.id && Array.isArray(v.comodos)) await dbPut(v); }
+          telaLista(); flash('Backup importado');
+        } catch { alert('Arquivo de backup inválido.'); }
+      };
+      i.click(); break;
+    }
+    case 'voltar':
+      await flush(); telaLista(); break;
+    case 'backup':
+      await flush();
+      baixar(new Blob([JSON.stringify(cur)], { type: 'application/json' }), `Vistoria-${cur.tipo}-${slug(enderecoCompleto(cur)) || 'imovel'}-${cur.data}.json`);
+      break;
+    case 'pdf':
+      await flush();
+      try { const doc = gerarPDF(cur, await cfgGet()); if (doc) doc.save(`Vistoria-${cur.tipo === 'entrega' ? 'entrega' : 'previa'}-${slug(enderecoCompleto(cur)) || 'imovel'}-${cur.data}.pdf`); }
+      catch (err) { console.error(err); alert('Erro ao gerar o PDF: ' + err.message); }
+      break;
+    case 'dellogo': {
+      if (!confirm('Remover o logo?')) return;
+      const c = await cfgGet(); c.logo = null; await cfgPut(c); telaLista(); break;
+    }
+    case 'restaurardecl':
+      if ((cur.declaracao || '').trim() && !confirm('Descartar os ajustes e voltar ao texto padrão?')) return;
+      cur.declaracao = ''; salvar(); telaEditor(); break;
+    case 'tab':
+      tab = +d.i; telaEditor(); break;
+    case 'addmenu':
+      $('#addmenu').hidden = !$('#addmenu').hidden; break;
+    case 'add': {
+      let nome = d.nome;
+      if (!nome) { nome = (prompt('Nome do cômodo:') || '').trim(); if (!nome) return; }
+      const n = cur.comodos.filter(c => c.nome === nome || c.nome.startsWith(nome + ' ')).length;
+      if (n) nome += ' ' + (n + 1);
+      cur.comodos.push(novoComodo(nome));
+      tab = cur.comodos.length - 1; salvar(); telaEditor(); break;
+    }
+    case 'mover': {
+      const j = tab + +d.d;
+      if (j < 0 || j >= cur.comodos.length) return;
+      [cur.comodos[tab], cur.comodos[j]] = [cur.comodos[j], cur.comodos[tab]];
+      tab = j; salvar(); telaEditor(); break;
+    }
+    case 'delcomodo':
+      if (!confirm(`Excluir o cômodo "${cur.comodos[tab].nome}" e todas as suas fotos?`)) return;
+      cur.comodos.splice(tab, 1); tab = Math.max(0, tab - 1); salvar(); telaEditor(); break;
+    case 'delfoto':
+      if (!confirm('Remover esta foto?')) return;
+      cur.comodos[tab].fotos.splice(+d.i, 1); salvar(); telaEditor(); break;
+  }
+});
+
+// ---------- PDF ----------
+function gerarPDF(v, cfg) {
+  if (!window.jspdf) { alert('A biblioteca de PDF não carregou. Verifique a conexão com a internet e recarregue a página.'); return null; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  const W = 210, H = 297, M = 15, CW = W - 2 * M, TOP = 20, BOT = H - 18;
+  let y = TOP, n = 1;
+
+  const font = (s, st = 'normal') => { doc.setFont('helvetica', st); doc.setFontSize(s); };
+  const novaPag = () => { doc.addPage(); y = TOP; };
+  const ensure = h => { if (y + h > BOT) novaPag(); };
+  // Largura real do texto como o PDF o desenha. O getTextWidth do jsPDF desconta kerning
+  // (ex.: "AT", "TA"), mas o texto é impresso sem kerning; por isso medimos letra por letra.
+  const larg = s => { let u = 0; for (const ch of s) u += doc.getStringUnitWidth(ch); return u * doc.getFontSize() / doc.internal.scaleFactor; };
+  const quebrar = (txt, maxW) => {
+    const linhas = [];
+    let atual = '';
+    for (const w of String(txt).split(/\s+/).filter(Boolean)) {
+      const tentativa = atual ? atual + ' ' + w : w;
+      if (!atual || larg(tentativa) <= maxW) atual = tentativa;
+      else { linhas.push(atual); atual = w; }
+    }
+    if (atual) linhas.push(atual);
+    return linhas.length ? linhas : [''];
+  };
+  // linha justificada: distribui o espaço que sobra entre as palavras
+  const linhaJustificada = (l, yy) => {
+    const ws = l.trim().split(/\s+/);
+    if (ws.length < 2) return doc.text(l, M, yy);
+    const gap = (CW - ws.reduce((a, w) => a + larg(w), 0)) / (ws.length - 1);
+    let x = M;
+    for (const w of ws) { doc.text(w, x, yy); x += larg(w) + gap; }
+  };
+  const para = (txt, s = 10, st = 'normal', justificar = false) => {
+    font(s, st);
+    const lh = s * 0.3528 * 1.45;
+    for (const bloco of String(txt).split('\n')) {
+      const linhas = quebrar(bloco, CW);
+      linhas.forEach((l, i) => {
+        ensure(lh);
+        // a última linha de cada parágrafo fica alinhada à esquerda, como em editores de texto
+        if (justificar && i < linhas.length - 1) linhaJustificada(l, y + lh * 0.75);
+        else doc.text(l, M, y + lh * 0.75);
+        y += lh;
+      });
+    }
+  };
+  const texto = txt => para(txt, 10, 'normal', true);
+  const secao = t => {
+    ensure(16);
+    doc.setFillColor(232, 237, 245); doc.rect(M, y, CW, 8, 'F');
+    font(11, 'bold'); doc.setTextColor(30, 41, 59); doc.text(t, M + 2.5, y + 5.5); doc.setTextColor(0);
+    y += 11;
+  };
+  const campo = (rotulo, valor) => {
+    if (!valor) return;
+    font(10);
+    const linhas = quebrar(valor, CW - 52), lh = 4.9;
+    ensure(linhas.length * lh + 1.5);
+    font(10, 'bold'); doc.text(rotulo, M, y + 3.7);
+    font(10); linhas.forEach((l, i) => doc.text(l, M + 52, y + 3.7 + i * lh));
+    y += linhas.length * lh + 1.5;
+  };
+  // parte: nome e CPF/CNPJ em colunas fixas, para ficarem alinhados entre locatário e locador
+  const parte = (rotulo, nome, docu) => {
+    if (!nome && !docu) return;
+    font(10);
+    const linhas = quebrar(nome || '', 72), lh = 4.9;
+    ensure(linhas.length * lh + 1.5);
+    font(10, 'bold'); doc.text(rotulo, M, y + 3.7);
+    if (docu) doc.text('CPF/CNPJ:', M + 128, y + 3.7);
+    font(10); linhas.forEach((l, i) => doc.text(l, M + 52, y + 3.7 + i * lh));
+    if (docu) doc.text(docu, M + 148, y + 3.7);
+    y += linhas.length * lh + 1.5;
+  };
+
+  // Cabeçalho do laudo (logo, nome e contato de quem elabora a vistoria)
+  const logo = cfg && cfg.logo;
+  if (logo || (cfg && (cfg.nome || cfg.contato))) {
+    let lw = 0, lh = 0;
+    if (logo) { lh = 22; lw = lh * logo.w / logo.h; if (lw > 50) { lw = 50; lh = lw * logo.h / logo.w; } doc.addImage(logo.data, 'PNG', M, y, lw, lh, 'logo'); }
+    const tx0 = M + (lw ? lw + 6 : 0), tw = CW - (tx0 - M);
+    let ty = y + 5;
+    if (cfg.nome) { font(12, 'bold'); doc.text(doc.splitTextToSize(cfg.nome, tw)[0], tx0, ty); ty += 5.5; }
+    if (cfg.contato) { font(8.5); doc.setTextColor(80); doc.splitTextToSize(cfg.contato, tw).slice(0, 4).forEach(l => { doc.text(l, tx0, ty); ty += 3.8; }); doc.setTextColor(0); }
+    y = Math.max(y + lh, ty) + 3;
+    doc.setDrawColor(180); doc.line(M, y, W - M, y);
+    y += 7;
+  }
+
+  // Capa / identificação
+  font(15, 'bold');
+  doc.text(v.tipo === 'entrega' ? 'LAUDO DE VISTORIA DE ENTREGA DE CHAVES' : 'LAUDO DE VISTORIA PRÉVIA (ENTRADA)', W / 2, y + 6, { align: 'center' });
+  y += 11;
+  font(10); doc.setTextColor(90); doc.text(`Data da vistoria: ${fmtData(v.data)}`, W / 2, y + 3, { align: 'center' }); doc.setTextColor(0);
+  y += 10;
+
+  secao(`${n++}. IDENTIFICAÇÃO`);
+  campo('Endereço:', (v.rua || v.endereco || '') + (v.numero ? ', nº ' + v.numero : ''));
+  campo('Complemento:', v.complemento);
+  campo('Bairro:', v.bairro);
+  campo('Cidade/UF:', cidadeUF(v));
+  campo('Contrato/referência:', v.contrato);
+  y += 2;
+  parte('Locatário(a):', v.locatario, v.locatarioDoc);
+  parte('Locador(a):', v.locador, v.locadorDoc);
+  campo('Vistoriador(a):', v.vistoriador);
+  y += 2;
+  campo('Tipo de vistoria:', TIPOS[v.tipo]);
+  if (v.tipo === 'previa') campo('Acompanhamento:', semLocatario(v) ? 'Vistoria realizada sem o acompanhamento do(a) locatário(a)' : 'Vistoria acompanhada pelo(a) locatário(a)');
+  y += 3;
+
+  if (v.chaves || v.agua || v.luz || v.gas) {
+    secao(`${n++}. CHAVES E MEDIDORES`);
+    campo('Chaves:', v.chaves);
+    campo('Hidrômetro (água):', v.agua);
+    campo('Medidor de energia:', v.luz);
+    campo('Medidor de gás:', v.gas);
+    y += 3;
+  }
+  if (v.obs) { secao(`${n++}. OBSERVAÇÕES GERAIS`); texto(v.obs); y += 3; }
+
+  const nComodos = n++;
+  secao(`${nComodos}. CÔMODOS VISTORIADOS`);
+  if (!v.comodos.length) para('Nenhum cômodo registrado.', 10, 'italic');
+  v.comodos.forEach((c, i) => para(`${nComodos}.${i + 1}  ${c.nome}${c.estado ? ' - estado geral: ' + c.estado : ''}  (${c.fotos.length} foto${c.fotos.length === 1 ? '' : 's'})`));
+
+  // Cômodo a cômodo
+  let fotoN = 0;
+  const GAP = 6, colW = (CW - GAP) / 2, MAXH = 80, CAP_LH = 3.6;
+  v.comodos.forEach((c, i) => {
+    novaPag();
+    secao(`${nComodos}.${i + 1}  ${(c.nome || 'Cômodo').toUpperCase()}`);
+    campo('Estado geral:', c.estado);
+    if (c.descricao.trim()) texto(c.descricao); else para('Sem descrição.', 10, 'italic');
+    y += 4;
+    for (let k = 0; k < c.fotos.length; k += 2) {
+      const par = c.fotos.slice(k, k + 2).map(f => {
+        let w = colW, h = colW * f.h / f.w;
+        if (h > MAXH) { h = MAXH; w = h * f.w / f.h; }
+        fotoN++;
+        font(8.5);
+        return { f, w, h, cap: doc.splitTextToSize(`Foto ${fotoN}${f.legenda ? ' - ' + f.legenda : ''}`, colW) };
+      });
+      const rowH = Math.max(...par.map(p => p.h + 3 + p.cap.length * CAP_LH)) + 5;
+      ensure(rowH);
+      par.forEach((p, j) => {
+        const x0 = M + j * (colW + GAP), x = x0 + (colW - p.w) / 2;
+        doc.addImage(p.f.data, 'JPEG', x, y, p.w, p.h, p.f.id);
+        doc.setDrawColor(190); doc.rect(x, y, p.w, p.h);
+        font(8.5); doc.setTextColor(70);
+        p.cap.forEach((l, li) => doc.text(l, x0 + colW / 2, y + p.h + 4 + li * CAP_LH, { align: 'center' }));
+        doc.setTextColor(0);
+      });
+      y += rowH;
+    }
+  });
+
+  // Declaração e assinaturas
+  novaPag();
+  secao(`${n++}. DECLARAÇÃO E ASSINATURAS`);
+  texto(textoDeclaracao(v));
+  y += 6;
+  // local da assinatura = cidade/UF do imóvel vistoriado; sem cidade, deixa espaço para preencher à mão
+  para(`${cidadeUF(v) || '______________________/____'}, ${extenso(v.data) || '____ de ______________ de ________'}.`);
+  if (semLocatario(v)) {
+    // data de recebimento: marco inicial do prazo de 10 dias
+    y += 8;
+    para('Recebi uma via deste laudo em ____/____/________.', 10, 'bold');
+  }
+  y += 22;
+  const assinatura = (nome, papel, docu) => {
+    ensure(32);
+    doc.setDrawColor(0); doc.line(M + 25, y, W - M - 25, y);
+    font(10, 'bold'); doc.text(nome || ' ', W / 2, y + 5, { align: 'center' });
+    font(9); doc.text(papel + (docu ? ` - CPF/CNPJ: ${docu}` : ''), W / 2, y + 9.5, { align: 'center' });
+    y += 32;
+  };
+  assinatura(v.locatario, 'LOCATÁRIO(A)', v.locatarioDoc);
+  assinatura(v.locador, 'LOCADOR(A) OU REPRESENTANTE', v.locadorDoc);
+  assinatura(v.vistoriador, 'VISTORIADOR(A)');
+
+  // Cabeçalho, rodapé e rubrica em todas as páginas
+  const total = doc.getNumberOfPages();
+  font(8);
+  const slh = 6, slw = logo ? Math.min(30, slh * logo.w / logo.h) : 0; // logo pequeno no cabeçalho (páginas 2+)
+  let cab = `${v.tipo === 'entrega' ? 'Vistoria de entrega de chaves' : 'Vistoria prévia'} - ${enderecoCompleto(v)}`;
+  while (doc.getTextWidth(cab) > CW - 25 - slw && cab.length > 10) cab = cab.slice(0, -4) + '...';
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    font(8); doc.setTextColor(120); doc.setDrawColor(210);
+    doc.text(cab, M, 10);
+    const comLogo = logo && p > 1;
+    if (comLogo) doc.addImage(logo.data, 'PNG', W - M - slw, 11 - slh, slw, slw * logo.h / logo.w, 'logo');
+    doc.text(fmtData(v.data), W - M - (comLogo ? slw + 3 : 0), 10, { align: 'right' });
+    doc.line(M, 12, W - M, 12);
+    doc.line(M, H - 13, W - M, H - 13);
+    doc.text('Rubrica do(a) locatário(a): ______________________', M, H - 8);
+    doc.text(`Página ${p} de ${total}`, W - M, H - 8, { align: 'right' });
+    doc.setTextColor(0);
+  }
+  return doc;
+}
+
+telaLista();
+</script>
+</body>
+</html>
