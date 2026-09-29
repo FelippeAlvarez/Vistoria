@@ -2,9 +2,17 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vistoria de Imóveis</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<meta name="description" content="Laudos de vistoria de imóveis para locação: vistoria prévia e de entrega de chaves, com fotos por cômodo e PDF.">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vistoria">
+<!-- bibliotecas guardadas junto do aplicativo, para funcionar sem internet -->
+<script src="lib/jspdf.umd.min.js"></script>
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--ink:#1e293b;--muted:#64748b;--line:#dbe2ea;--pri:#1d4ed8;--danger:#b91c1c;--chip:#eef2f7}
 @media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18202b;--ink:#e2e8f0;--muted:#94a3b8;--line:#2b3746;--pri:#3b82f6;--danger:#f87171;--chip:#223043}}
@@ -44,6 +52,18 @@ figure input{border:0;border-top:1px solid var(--line);border-radius:0;font-size
 .lista li{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}
 .lista small{display:block;color:var(--muted)}
 .muted{color:var(--muted)}
+.previa{position:fixed;inset:0;z-index:50;background:#525659;display:flex;flex-direction:column}
+.previa-barra{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+.previa-paginas{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.previa-paginas canvas{background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:100%}
+.previa-paginas .muted{color:#eee}
+@media (max-width:600px){
+  .previa-barra{padding:8px}
+  .previa-barra strong{display:none}
+  .previa-barra .row{width:100%;flex-wrap:nowrap;gap:6px}
+  .previa-barra .btn{flex:1;justify-content:center;padding:8px 6px;font-size:13px}
+  .previa-paginas{padding:8px}
+}
 h2 small{font-weight:400;font-size:13px}
 .cabecalho{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
 .cabecalho .grid{flex:1;min-width:240px}
@@ -69,7 +89,7 @@ input.uf{text-transform:uppercase;text-align:center}
 </style>
 </head>
 <body>
-<header><h1>Vistoria de Imóveis</h1><span id="status"></span></header>
+<header><h1>Vistoria de Imóveis</h1><div class="row"><span id="status"></span><button class="btn primary" id="instalar" hidden>⬇️ Instalar aplicativo</button></div></header>
 <main id="app"></main>
 <script>
 // ---------- Armazenamento local (IndexedDB) ----------
@@ -155,7 +175,31 @@ function novaVistoria(tipo) {
     locador: '', locadorDoc: '', vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
     comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
 }
-const novoComodo = nome => ({ id: uid(), nome, estado: '', descricao: '', fotos: [] });
+// "base" = tipo do cômodo (Quarto, Banheiro…), usado na numeração automática.
+// Se o usuário renomear o cômodo à mão, a base é removida e ele sai da numeração.
+const novoComodo = (nome, base = nome) => ({ id: uid(), nome, base, estado: '', descricao: '', fotos: [] });
+const chave = s => (s || '').trim().toLocaleLowerCase('pt-BR');
+// cômodos criados até a v05 não tinham "base": deduz a partir do nome ("Quarto 2" -> "Quarto")
+function baseDe(c) {
+  if (c.base !== undefined) return c.base;
+  const m = /^(.*?)(?:\s+\d+)?$/.exec(c.nome.trim());
+  return m[1];
+}
+// Numera cômodos de mesmo tipo na ordem em que aparecem: Quarto 01, Quarto 02…
+// Um cômodo sozinho fica sem número ("Cozinha").
+function renumerar(v) {
+  const grupos = new Map();
+  for (const c of v.comodos) {
+    c.base = baseDe(c);
+    if (!c.base) continue;
+    const k = chave(c.base);
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(c);
+  }
+  for (const lista of grupos.values()) {
+    lista.forEach((c, i) => { c.nome = lista.length === 1 ? c.base : `${c.base} ${String(i + 1).padStart(2, '0')}`; });
+  }
+}
 function salvar() {
   clearTimeout(saveT);
   saveT = setTimeout(flush, 400);
@@ -243,7 +287,9 @@ function telaEditor() {
     <button class="btn" data-act="voltar">← Vistorias</button>
     <div class="row">
       <button class="btn" data-act="backup">Backup (JSON)</button>
-      <button class="btn primary" data-act="pdf">Gerar PDF</button>
+      <button class="btn" data-act="previa">👁️ Visualizar</button>
+      <button class="btn" data-act="compartilhar">📤 Compartilhar</button>
+      <button class="btn primary" data-act="pdf">⬇️ Salvar PDF</button>
     </div>
   </div>
   <section class="card">
@@ -371,7 +417,10 @@ app.addEventListener('input', e => {
     }
   } else if (t.dataset.cf) {
     cur.comodos[tab][t.dataset.cf] = t.value;
-    if (t.dataset.cf === 'nome') { const s = app.querySelector('.tab.on span'); if (s) s.textContent = t.value || 'Sem nome'; }
+    if (t.dataset.cf === 'nome') {
+      cur.comodos[tab].base = null; // nome escolhido à mão: não entra na numeração automática
+      const s = app.querySelector('.tab.on span'); if (s) s.textContent = t.value || 'Sem nome';
+    }
   } else if (t.dataset.pf) {
     cur.comodos[tab].fotos[+t.dataset.pf].legenda = t.value;
   } else return;
@@ -380,6 +429,13 @@ app.addEventListener('input', e => {
 
 app.addEventListener('change', async e => {
   const t = e.target;
+  if (t.dataset.cf === 'nome') {
+    // ao sair do campo de nome: renumera os demais e atualiza só os rótulos das abas
+    // (sem redesenhar a tela, para não perder o clique que tirou o foco do campo)
+    renumerar(cur); salvar();
+    app.querySelectorAll('.tab[data-i]').forEach(b => { b.querySelector('span').textContent = cur.comodos[+b.dataset.i].nome || 'Sem nome'; });
+    return;
+  }
   if (t.hasAttribute('data-logo') && t.files.length) {
     try {
       const c = await cfgGet();
@@ -414,7 +470,7 @@ app.addEventListener('click', async e => {
       const o = migrar(await dbGet(d.id));
       cur = novaVistoria('entrega');
       for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc', 'locador', 'locadorDoc', 'vistoriador']) cur[k] = o[k];
-      cur.comodos = o.comodos.map(c => novoComodo(c.nome));
+      cur.comodos = o.comodos.map(c => novoComodo(c.nome, baseDe(c)));
       tab = 0; await dbPut(cur); telaEditor(); break;
     }
     case 'excluir':
@@ -437,11 +493,18 @@ app.addEventListener('click', async e => {
       await flush();
       baixar(new Blob([JSON.stringify(cur)], { type: 'application/json' }), `Vistoria-${cur.tipo}-${slug(enderecoCompleto(cur)) || 'imovel'}-${cur.data}.json`);
       break;
-    case 'pdf':
-      await flush();
-      try { const doc = gerarPDF(cur, await cfgGet()); if (doc) doc.save(`Vistoria-${cur.tipo === 'entrega' ? 'entrega' : 'previa'}-${slug(enderecoCompleto(cur)) || 'imovel'}-${cur.data}.pdf`); }
-      catch (err) { console.error(err); alert('Erro ao gerar o PDF: ' + err.message); }
+    case 'pdf': {
+      const doc = await montarPDF(); if (doc) doc.save(nomePDF(cur));
       break;
+    }
+    case 'compartilhar': {
+      const doc = await montarPDF(); if (doc) compartilharPDF(doc, cur);
+      break;
+    }
+    case 'previa': {
+      const doc = await montarPDF(); if (doc) abrirPrevia(doc, cur);
+      break;
+    }
     case 'dellogo': {
       if (!confirm('Remover o logo?')) return;
       const c = await cfgGet(); c.logo = null; await cfgPut(c); telaLista(); break;
@@ -455,28 +518,115 @@ app.addEventListener('click', async e => {
       $('#addmenu').hidden = !$('#addmenu').hidden; break;
     case 'add': {
       let nome = d.nome;
-      if (!nome) { nome = (prompt('Nome do cômodo:') || '').trim(); if (!nome) return; }
-      const n = cur.comodos.filter(c => c.nome === nome || c.nome.startsWith(nome + ' ')).length;
-      if (n) nome += ' ' + (n + 1);
-      cur.comodos.push(novoComodo(nome));
+      if (!nome) {
+        nome = (prompt('Nome do cômodo:') || '').trim(); if (!nome) return;
+        nome = nome.charAt(0).toLocaleUpperCase('pt-BR') + nome.slice(1);
+      }
+      // se já existe cômodo desse tipo, usa a mesma grafia para agrupar ("banheiro" -> "Banheiro")
+      const igual = cur.comodos.find(c => chave(baseDe(c)) === chave(nome));
+      cur.comodos.push(novoComodo(nome, igual ? baseDe(igual) : nome));
+      renumerar(cur);
       tab = cur.comodos.length - 1; salvar(); telaEditor(); break;
     }
     case 'mover': {
       const j = tab + +d.d;
       if (j < 0 || j >= cur.comodos.length) return;
       [cur.comodos[tab], cur.comodos[j]] = [cur.comodos[j], cur.comodos[tab]];
+      renumerar(cur);
       tab = j; salvar(); telaEditor(); break;
     }
     case 'delcomodo':
       if (!confirm(`Excluir o cômodo "${cur.comodos[tab].nome}" e todas as suas fotos?`)) return;
-      cur.comodos.splice(tab, 1); tab = Math.max(0, tab - 1); salvar(); telaEditor(); break;
+      cur.comodos.splice(tab, 1); renumerar(cur); tab = Math.max(0, tab - 1); salvar(); telaEditor(); break;
     case 'delfoto':
       if (!confirm('Remover esta foto?')) return;
       cur.comodos[tab].fotos.splice(+d.i, 1); salvar(); telaEditor(); break;
   }
 });
 
-// ---------- PDF ----------
+// ---------- PDF: salvar, visualizar, compartilhar ----------
+const nomePDF = v => `Vistoria-${v.tipo === 'entrega' ? 'entrega' : 'previa'}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
+async function montarPDF() {
+  await flush();
+  try { return gerarPDF(cur, await cfgGet()); }
+  catch (err) { console.error(err); alert('Erro ao gerar o PDF: ' + err.message); return null; }
+}
+
+async function compartilharPDF(doc, v) {
+  const arquivo = new File([doc.output('blob')], nomePDF(v), { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+    try {
+      await navigator.share({ files: [arquivo], title: 'Laudo de vistoria', text: `Laudo de vistoria - ${enderecoCompleto(v)}` });
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('Não foi possível compartilhar: ' + err.message); // AbortError = usuário cancelou
+    }
+  } else {
+    doc.save(nomePDF(v));
+    alert('Este navegador não permite compartilhar arquivos diretamente.\nO PDF foi salvo no aparelho; anexe-o pelo WhatsApp, e-mail etc.');
+  }
+}
+
+// A prévia é desenhada na própria página com o pdf.js, porque os celulares
+// (principalmente Android) não exibem PDF gerado no navegador: apenas baixam o arquivo.
+const PDFJS = 'lib/';
+function carregarPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = PDFJS + 'pdf.min.js';
+    s.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; res(); };
+    s.onerror = () => rej(new Error('sem conexão com a internet'));
+    document.head.appendChild(s);
+  });
+}
+async function abrirPrevia(doc, v) {
+  const ov = document.createElement('div');
+  ov.className = 'previa';
+  ov.innerHTML = `
+    <div class="previa-barra">
+      <strong>Prévia do laudo</strong>
+      <div class="row">
+        <button class="btn" data-p="compartilhar">📤 Compartilhar</button>
+        <button class="btn primary" data-p="salvar">⬇️ Salvar PDF</button>
+        <button class="btn" data-p="fechar">✕ Fechar</button>
+      </div>
+    </div>
+    <div class="previa-paginas"><p class="muted">Gerando prévia…</p></div>`;
+  document.body.appendChild(ov);
+  document.body.style.overflow = 'hidden';
+  const fechar = () => { ov.remove(); document.body.style.overflow = ''; document.removeEventListener('keydown', teclaEsc); };
+  const teclaEsc = e => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', teclaEsc);
+  ov.addEventListener('click', e => {
+    const a = e.target.closest('[data-p]'); if (!a) return;
+    if (a.dataset.p === 'fechar') fechar();
+    if (a.dataset.p === 'salvar') doc.save(nomePDF(v));
+    if (a.dataset.p === 'compartilhar') compartilharPDF(doc, v);
+  });
+  const area = ov.querySelector('.previa-paginas');
+  try {
+    await carregarPdfJs();
+    const pdf = await pdfjsLib.getDocument({ data: doc.output('arraybuffer') }).promise;
+    area.innerHTML = '';
+    // se a área ainda não tiver largura medida (página em segundo plano), usa a da janela
+    const larg = Math.max(240, Math.min((area.clientWidth || window.innerWidth || 800) - 24, 900));
+    for (let p = 1; p <= pdf.numPages; p++) {
+      if (!ov.isConnected) return; // fechou antes de terminar
+      const pg = await pdf.getPage(p);
+      const escala = larg / pg.getViewport({ scale: 1 }).width;
+      const vp = pg.getViewport({ scale: escala * (window.devicePixelRatio || 1) });
+      const cv = document.createElement('canvas');
+      cv.width = vp.width; cv.height = vp.height;
+      cv.style.width = larg + 'px';
+      area.appendChild(cv);
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (err) {
+    area.innerHTML = `<p class="muted">Não foi possível gerar a prévia (${esc(err.message)}). Use "Salvar PDF" e abra o arquivo.</p>`;
+  }
+}
+
+// ---------- PDF: montagem ----------
 function gerarPDF(v, cfg) {
   if (!window.jspdf) { alert('A biblioteca de PDF não carregou. Verifique a conexão com a internet e recarregue a página.'); return null; }
   const { jsPDF } = window.jspdf;
@@ -679,6 +829,23 @@ function gerarPDF(v, cfg) {
   }
   return doc;
 }
+
+// ---------- Aplicativo instalável (PWA) ----------
+// O service worker guarda o aplicativo no aparelho para funcionar sem internet.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker não registrado:', err));
+}
+// Chrome/Edge/Android oferecem a instalação por este evento; o botão só aparece quando é possível instalar.
+let pedidoInstalacao = null;
+const btnInstalar = $('#instalar');
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalacao = e; btnInstalar.hidden = false; });
+btnInstalar.addEventListener('click', async () => {
+  if (!pedidoInstalacao) return;
+  pedidoInstalacao.prompt();
+  await pedidoInstalacao.userChoice;
+  pedidoInstalacao = null; btnInstalar.hidden = true;
+});
+window.addEventListener('appinstalled', () => { btnInstalar.hidden = true; flash('Aplicativo instalado ✓'); });
 
 telaLista();
 </script>
