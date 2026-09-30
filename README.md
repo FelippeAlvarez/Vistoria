@@ -24,6 +24,7 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 - **Dois tipos de vistoria:** prévia (entrada) e entrega de chaves. A partir de uma vistoria prévia, é possível criar a de entrega com os mesmos dados e cômodos.
 - **Dados do imóvel e das partes:** endereço (rua, número, complemento, bairro, cidade e UF), locatário e locador com CPF/CNPJ, vistoriador, contrato, chaves e leituras de água, energia e gás.
 - **Um cômodo por aba**, com estado geral, descrição e fotos com legenda (tiradas na hora pela câmera ou escolhidas da galeria). Cômodos repetidos são numerados automaticamente (Quarto 01, Quarto 02…).
+- **Ditado por voz** (botão 🎤) na descrição dos cômodos, nas legendas das fotos e nas observações gerais. Usa o reconhecimento de voz do navegador (Chrome, Edge ou Safari) e **só funciona com internet**.
 - **Acompanhamento da vistoria prévia:** indica se o locatário acompanhou ou não; se não acompanhou, o laudo informa o prazo de 10 dias para manifestar discordância.
 - **Declaração final editável** em cada vistoria, a partir de um texto padrão.
 - **Cabeçalho personalizado** com logo, nome e contato de quem elabora a vistoria.

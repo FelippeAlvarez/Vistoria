@@ -84,6 +84,15 @@ textarea{resize:vertical}
 figure{margin:0;position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
 figure img{width:100%;height:140px;object-fit:cover;display:block}
 figure input{border:0;border-top:1px solid var(--line);border-radius:0;font-size:13px}
+figure .legenda{display:flex;align-items:stretch;border-top:1px solid var(--line)}
+figure .legenda input{border-top:0;min-width:0}
+/* ditado por voz */
+.voz{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.voz-status{font-size:13px;color:var(--muted)}
+.mic.gravando{background:var(--danger);border-color:var(--danger);color:#fff;animation:pulsar 1.2s ease-in-out infinite}
+.mic.mini{border:0;border-left:1px solid var(--line);border-radius:0;padding:0 10px;font-size:16px;background:var(--bg)}
+.mic.mini.gravando{background:var(--danger)}
+@keyframes pulsar{50%{opacity:.6}}
 .x{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:1;cursor:pointer}
 .lista{list-style:none;margin:0;padding:0}
 .lista li{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}
@@ -387,6 +396,104 @@ async function enviarParaEdicao(v) {
   alert('O arquivo do laudo foi salvo no aparelho.\nEnvie-o para a outra pessoa, que deve abri-lo no aplicativo em "Laudos de outras pessoas" → "Importar arquivo".');
 }
 
+// ---------- Ditado por voz ----------
+// Usa o reconhecimento de voz do navegador: Google (Chrome, Edge, Android) ou Apple (Safari, iPhone).
+// O áudio é processado pelo serviço do navegador e só funciona com internet; o aplicativo não grava áudio.
+const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+const temDitado = !!Reconhecimento;
+const ehCelular = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+let ditado = null; // sessão ativa: { rec, botao, rotulo, campo, base, ativo, erro, editado }
+
+function botaoDitar(alvo, estilo) {
+  if (!temDitado) return '';
+  const mini = estilo === 'mini';
+  const btn = `<button type="button" class="btn mic${mini ? ' mini' : ''}" data-act="ditar" data-alvo="${esc(alvo)}" title="Ditar por voz (precisa de internet)">${mini ? '🎤' : '🎤 Ditar'}</button>`;
+  return mini ? btn : `<div class="voz ${estilo}">${btn}<span class="voz-status"></span></div>`;
+}
+// acrescenta o trecho ditado ao texto, com espaço e inicial maiúscula no começo de frase
+function juntar(base, trecho) {
+  trecho = trecho.trim();
+  if (!trecho) return base;
+  if (!base.trim() || /[.!?]\s*$/.test(base)) trecho = trecho.charAt(0).toLocaleUpperCase('pt-BR') + trecho.slice(1);
+  return base + (!base || /\s$/.test(base) ? '' : ' ') + trecho;
+}
+function avisoDitado(d, msg) {
+  const s = d.botao.isConnected && d.botao.parentElement.querySelector('.voz-status');
+  if (s) s.textContent = msg; else if (msg) flash(msg, 2500);
+}
+function gravarNoCampo(d, texto) {
+  if (!d.campo.isConnected) return;
+  d.campo.value = texto;
+  d.campo.dispatchEvent(new Event('input', { bubbles: true })); // salva pelo mesmo caminho da digitação
+  if (d.campo.tagName === 'TEXTAREA') d.campo.scrollTop = d.campo.scrollHeight;
+}
+function encerrarDitado(d) {
+  if (!d.editado) gravarNoCampo(d, d.base); // descarta o trecho provisório que não foi confirmado
+  d.botao.classList.remove('gravando');
+  d.botao.textContent = d.rotulo;
+  avisoDitado(d, '');
+  if (ditado === d) ditado = null;
+}
+function iniciarDitado(botao) {
+  const campo = app.querySelector(botao.dataset.alvo);
+  if (!campo) return;
+  if (!navigator.onLine) {
+    alert('O ditado por voz só funciona com conexão à internet.\nSem conexão, digite o texto normalmente.');
+    return;
+  }
+  const rec = new Reconhecimento();
+  rec.lang = 'pt-BR';
+  rec.interimResults = true;
+  rec.continuous = !ehCelular; // no celular o modo contínuo repete trechos; lá o reconhecimento é reiniciado a cada pausa
+  const d = { rec, botao, rotulo: botao.textContent, campo, base: campo.value, ativo: true, erro: false, editado: false };
+  ditado = d;
+  rec.onresult = e => {
+    if (d.editado) return; // a pessoa digitou no campo: o que ela escreveu prevalece
+    let provisorio = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) d.base = juntar(d.base, t); else provisorio += t;
+    }
+    gravarNoCampo(d, juntar(d.base, provisorio));
+  };
+  rec.onerror = e => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    d.erro = true;
+    const msgs = {
+      'not-allowed': 'O microfone foi bloqueado. Permita o uso do microfone para este aplicativo nas configurações do navegador ou do celular.',
+      'service-not-allowed': 'O ditado por voz não está liberado neste navegador ou aparelho.',
+      'network': 'O ditado por voz precisa de internet. Verifique a conexão e tente de novo.',
+      'audio-capture': 'Nenhum microfone foi encontrado neste aparelho.',
+      'language-not-supported': 'O ditado em português não está disponível neste aparelho.'
+    };
+    alert(msgs[e.error] || 'Não foi possível usar o ditado por voz (' + e.error + ').');
+  };
+  rec.onend = () => {
+    if (d.ativo && !d.erro && ditado === d && d.campo.isConnected) {
+      try { rec.start(); return; } catch { /* segue para encerrar */ }
+    }
+    encerrarDitado(d);
+  };
+  try { rec.start(); } catch (err) { ditado = null; alert('Não foi possível iniciar o ditado: ' + err.message); return; }
+  botao.classList.add('gravando');
+  botao.textContent = botao.classList.contains('mini') ? '⏹' : '⏹ Parar';
+  avisoDitado(d, 'Ouvindo… fale agora. Toque em Parar ao terminar.');
+}
+function pararDitado() {
+  const d = ditado;
+  if (!d) return;
+  d.ativo = false;
+  try { d.rec.stop(); } catch { encerrarDitado(d); } // o onend confirma o último trecho e encerra
+}
+// usado antes de redesenhar a tela ou trocar de tela
+function cancelarDitado() {
+  const d = ditado;
+  if (!d) return;
+  ditado = null; d.ativo = false;
+  if (!d.editado) gravarNoCampo(d, d.base);
+  try { d.rec.abort(); } catch { /* já encerrado */ }
+}
+
 // ---------- Navegação entre telas ----------
 // Endereços: #/inicio, #/vistorias, #/recebidos, #/cadastro, #/config, #/vistoria/<código>
 // (assim o botão "voltar" do celular e do navegador funciona normalmente)
@@ -400,6 +507,7 @@ function topo(titulo, voltarPara) {
 // vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
 const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim());
 async function rotear() {
+  cancelarDitado();
   const anterior = cur;
   await flush();
   const [, nome, id] = location.hash.match(/^#\/([a-z]+)(?:\/([a-z0-9]+))?/i) || [];
@@ -422,7 +530,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.2';
+const VERSAO_APP = '1.3';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -448,9 +556,11 @@ async function telaInicio() {
   atualizarInstalar();
 }
 
-// A data da versão identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
-const TERMOS_DATA = '30/09/2026';
-const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_DATA; };
+// TERMOS_VERSAO identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
+// (a 1ª versão, de 30/09/2026, foi registrada com a versão "30/09/2026")
+const TERMOS_VERSAO = '30/09/2026-r2';
+const TERMOS_DATA = '30/09/2026 (revisão 2: ditado por voz)';
+const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_VERSAO; };
 async function telaTermos(exigirAceite = false) {
   topo('Termos de Uso', exigirAceite ? null : 'inicio');
   const aceite = exigirAceite ? null : await cfgLer('aceite');
@@ -475,6 +585,7 @@ async function telaTermos(exigirAceite = false) {
       <li>atender às solicitações dos titulares (acesso, correção, eliminação e demais direitos previstos no art. 18 da LGPD);</li>
       <li>manter a segurança do dispositivo em que o aplicativo é utilizado (senha, bloqueio de tela, atualizações) e dos arquivos gerados;</li>
       <li>responder pelo envio e compartilhamento de laudos, PDFs e arquivos para edição a terceiros, por qualquer meio (WhatsApp, e-mail, pastas compartilhadas, serviços de nuvem etc.);</li>
+      <li>decidir sobre o uso do ditado por voz (seção 6), ciente de que a fala é processada por serviço de terceiro, e evitar ditar dados pessoais desnecessários;</li>
       <li>eliminar os dados quando cessada a finalidade do tratamento, observados os prazos legais de guarda.</li>
     </ol>
     <p>Como não tem acesso aos dados inseridos, o desenvolvedor <strong>não atua como controlador nem como operador</strong> desses dados e não responde por seu tratamento, vazamento, perda ou uso indevido.</p>
@@ -485,19 +596,30 @@ async function telaTermos(exigirAceite = false) {
     <h3>5. Falhas, perda de dados e disponibilidade</h3>
     <p>O aplicativo pode apresentar erros, falhas, incompatibilidades com determinados aparelhos ou navegadores, interrupções e alterações de funcionamento, inclusive em razão de atualizações automáticas. Os dados armazenados podem ser perdidos, entre outras hipóteses, pela limpeza dos dados do navegador, pela desinstalação do aplicativo, por defeito, perda, furto ou troca do aparelho. <strong>É responsabilidade exclusiva do usuário realizar cópias de segurança periódicas</strong> (função “Backup de todas”) e conferir cada laudo gerado. A disponibilidade do endereço de acesso depende de serviços de terceiros e pode ser suspensa ou encerrada a qualquer tempo, sem aviso prévio.</p>
 
-    <h3>6. Isenção de responsabilidade</h3>
+    <h3>6. Ditado por voz</h3>
+    <p>O aplicativo oferece, <strong>de forma opcional</strong>, o botão “🎤 Ditar”, que transforma a fala do usuário em texto nos campos de descrição dos cômodos, legendas das fotos e observações gerais. Sobre essa funcionalidade:</p>
+    <ol>
+      <li><strong>ela somente funciona com conexão à internet</strong> e não está disponível em todos os navegadores e aparelhos (por exemplo, não funciona no Firefox);</li>
+      <li>a transcrição é realizada pelo serviço de reconhecimento de voz do fornecedor do navegador ou do sistema operacional do aparelho (como Google, Apple ou Microsoft), para o qual a fala é enviada, sujeitando-se aos termos e políticas de privacidade desse fornecedor;</li>
+      <li>o aplicativo não grava nem armazena o áudio, e o desenvolvedor não recebe, não armazena e não tem acesso à fala nem à transcrição;</li>
+      <li>o uso do microfone depende de autorização concedida pelo próprio usuário no navegador ou no aparelho, e pode ser revogada a qualquer tempo;</li>
+      <li>a transcrição pode conter erros, omissões e falhas de pontuação, cabendo ao usuário revisá-la e corrigi-la antes de utilizar o laudo;</li>
+      <li>o usuário deve evitar ditar dados pessoais desnecessários e é o único responsável pelo conteúdo ditado e pela decisão de utilizar a funcionalidade.</li>
+    </ol>
+
+    <h3>7. Isenção de responsabilidade</h3>
     <p>Na máxima extensão permitida pela legislação aplicável, <strong>o desenvolvedor fica isento de toda e qualquer responsabilidade</strong> por danos diretos ou indiretos, materiais ou morais, lucros cessantes, perda de dados, prejuízos decorrentes de falhas, erros ou indisponibilidade do aplicativo, bem como por quaisquer consequências do uso dos laudos, inclusive em negociações, cobranças, processos administrativos ou judiciais, e por atos do usuário ou de terceiros.</p>
 
-    <h3>7. Serviços e componentes de terceiros</h3>
-    <p>O aplicativo é hospedado no GitHub Pages e pode interagir com serviços de terceiros escolhidos pelo usuário (aplicativos de mensagens, e-mail, serviços de armazenamento em nuvem), regidos por seus próprios termos e políticas, pelos quais o desenvolvedor não responde. Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).</p>
+    <h3>8. Serviços e componentes de terceiros</h3>
+    <p>O aplicativo é hospedado no GitHub Pages e pode interagir com serviços de terceiros escolhidos pelo usuário (aplicativos de mensagens, e-mail, serviços de armazenamento em nuvem e serviços de reconhecimento de voz do navegador ou do aparelho), regidos por seus próprios termos e políticas, pelos quais o desenvolvedor não responde. Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).</p>
 
-    <h3>8. Propriedade intelectual</h3>
+    <h3>9. Propriedade intelectual</h3>
     <p>O aplicativo, seu código, layout e textos são de titularidade de ${TITULAR}. É concedida ao usuário licença gratuita, pessoal, não exclusiva e revogável de uso. É vedado copiar, modificar, redistribuir ou explorar comercialmente o aplicativo sem autorização prévia e por escrito do titular.</p>
 
-    <h3>9. Alterações destes Termos</h3>
+    <h3>10. Alterações destes Termos</h3>
     <p>Estes Termos podem ser alterados a qualquer tempo, com a publicação da nova versão nesta página. O uso continuado do aplicativo após a alteração implica a aceitação da versão vigente.</p>
 
-    <h3>10. Legislação aplicável e foro</h3>
+    <h3>11. Legislação aplicável e foro</h3>
     <p>Estes Termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da Comarca da Capital do Estado do Rio de Janeiro (cidade do Rio de Janeiro/RJ) para dirimir quaisquer controvérsias deles decorrentes, ressalvadas as hipóteses em que a lei estabeleça competência diversa.</p>
   </article>
   ${exigirAceite ? `
@@ -589,6 +711,9 @@ async function telaConfig() {
     <h2>📱 Aplicativo</h2>
     <p style="margin-top:0">${emApp() ? 'Aplicativo instalado neste aparelho ✓' : 'Você está usando pelo navegador.'}
       As vistorias ficam guardadas somente neste aparelho: faça backup em "Minhas vistorias" → "Backup de todas".</p>
+    <p>🎤 Ditado por voz: ${temDitado
+      ? '<strong>disponível neste navegador</strong>. Funciona somente com internet; o microfone será autorizado no primeiro uso.'
+      : '<strong>não disponível neste navegador</strong>. Use o Chrome (Android ou computador), o Edge ou o Safari (iPhone), ou o microfone do teclado do celular.'}</p>
   </section>`;
 }
 
@@ -654,6 +779,7 @@ function inp(f, label, type = 'text', cls = '', attrs = '') {
 }
 
 function telaEditor() {
+  cancelarDitado();
   const sy = scrollY, v = cur;
   topo(v.tipo === 'entrega' ? 'Vistoria de entrega' : 'Vistoria prévia', 'vistorias');
   app.innerHTML = `
@@ -707,6 +833,7 @@ function telaEditor() {
     <h3>Textos do laudo</h3>
     <div class="grid">
       <label class="full">Observações gerais<textarea data-f="obs" rows="3">${esc(v.obs)}</textarea></label>
+      ${botaoDitar('[data-f="obs"]', 'full')}
       <label class="full">Texto da declaração final (pode ser ajustado livremente nesta vistoria)
         <textarea data-f="declaracao" rows="8">${esc(textoDeclaracao(v))}</textarea></label>
       <div class="row full">
@@ -739,6 +866,7 @@ function painelComodo() {
       <label>Estado geral<select data-cf="estado">${ESTADOS.map(e => `<option value="${e}" ${e === c.estado ? 'selected' : ''}>${e || '—'}</option>`).join('')}</select></label>
       <label class="full">Descrição (piso, paredes, teto, portas, janelas, instalações elétricas e hidráulicas, avarias…)
         <textarea data-cf="descricao" rows="7">${esc(c.descricao)}</textarea></label>
+      ${botaoDitar('[data-cf="descricao"]', 'full')}
     </div>
     <div class="row">
       <label class="btn primary">📷 Tirar foto<input type="file" accept="image/*" capture="environment" data-file hidden></label>
@@ -748,7 +876,7 @@ function painelComodo() {
     <div class="fotos">${c.fotos.map((f, i) => `
       <figure>
         <img src="${f.data}" alt="Foto ${i + 1}">
-        <input data-pf="${i}" placeholder="Legenda da foto ${i + 1}" value="${esc(f.legenda)}">
+        <div class="legenda"><input data-pf="${i}" placeholder="Legenda da foto ${i + 1}" value="${esc(f.legenda)}">${botaoDitar(`[data-pf="${i}"]`, 'mini')}</div>
         <button class="x" data-act="delfoto" data-i="${i}" title="Remover foto">×</button>
       </figure>`).join('')}</div>
     <div class="row between">
@@ -765,6 +893,8 @@ function painelComodo() {
 let cfgT = null, cfgPend = {};
 app.addEventListener('input', e => {
   const t = e.target;
+  // se a pessoa digitar no campo durante o ditado, o ditado para e o que ela digitou é mantido
+  if (ditado && e.isTrusted && t === ditado.campo) { ditado.editado = true; pararDitado(); }
   if (t.hasAttribute('data-busca')) {
     const q = chave(t.value);
     app.querySelectorAll('.lista li[data-texto]').forEach(li => { li.hidden = q && !li.dataset.texto.includes(q); });
@@ -890,9 +1020,15 @@ app.addEventListener('click', async e => {
       const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() });
       flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + v.id); break;
     }
+    case 'ditar': {
+      const mesmo = ditado && ditado.botao === b;
+      if (ditado) pararDitado();
+      if (!mesmo) iniciarDitado(b);
+      break;
+    }
     case 'aceitar':
       if (!$('#concordo').checked) return;
-      await cfgGravar({ id: 'aceite', versao: TERMOS_DATA, em: Date.now() });
+      await cfgGravar({ id: 'aceite', versao: TERMOS_VERSAO, em: Date.now() });
       flash('Termos aceitos ✓', 3000);
       rotear(); break;
     case 'escolherpasta':
