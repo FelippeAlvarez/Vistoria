@@ -38,6 +38,7 @@ a.btn{text-decoration:none}
 .acoes .btn{justify-content:center}
 .aviso{background:var(--chip);border-radius:8px;padding:10px 12px;font-size:14px}
 .busca{margin-bottom:8px}
+.rodape{margin:28px 0 8px;padding-top:14px;border-top:1px solid var(--line);text-align:center;font-size:12px;line-height:1.6;color:var(--muted)}
 .tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);margin-left:6px}
 @media (max-width:600px){
   main{padding:12px}
@@ -384,9 +385,13 @@ function topo(titulo, voltarPara) {
   a.hidden = !voltarPara;
   if (voltarPara) a.href = '#/' + voltarPara;
 }
+// vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
+const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim());
 async function rotear() {
+  const anterior = cur;
   await flush();
   const [, nome, id] = location.hash.match(/^#\/([a-z]+)(?:\/([a-z0-9]+))?/i) || [];
+  if (anterior && !(nome === 'vistoria' && id === anterior.id) && vazia(anterior)) await dbDel(anterior.id);
   if (nome === 'vistoria' && id) {
     if (!cur || cur.id !== id) {
       const v = await dbGet(id);
@@ -403,6 +408,9 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
+const VERSAO_APP = '1.1';
+const TITULAR = 'Felippe Alvarez';
+const ANO_INICIO = 2026;
 async function telaInicio() {
   topo('Vistoria de Imóveis', null);
   const [todas, cfg] = await Promise.all([dbAll(), cfgGet()]);
@@ -416,7 +424,12 @@ async function telaInicio() {
     <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
     <a class="tile" href="#/config"><span class="ico">⚙️</span><strong>Configurações</strong><small>Pastas dos PDFs e dos laudos</small></a>
   </div>
-  <section class="card" id="card-instalar" hidden></section>`;
+  <section class="card" id="card-instalar" hidden></section>
+  <footer class="rodape">
+    © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.<br>
+    Vistoria de Imóveis · versão ${VERSAO_APP}<br>
+    Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).
+  </footer>`;
   atualizarInstalar();
 }
 
