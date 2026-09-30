@@ -46,6 +46,11 @@ a.btn{text-decoration:none}
 .termos p,.termos li{text-align:justify}
 .termos ol{padding-left:22px}
 .termos .destaque{background:var(--chip);border-radius:8px;padding:10px 12px}
+.aceite{display:flex;flex-direction:column;gap:14px;position:sticky;bottom:12px;box-shadow:0 4px 18px rgba(0,0,0,.15)}
+.check{flex-direction:row;align-items:flex-start;gap:10px;font-size:15px;color:var(--ink);cursor:pointer}
+.check input{width:22px;height:22px;flex:none;margin:1px 0 0}
+.aceite .btn{justify-content:center;padding:12px}
+.aceite .btn:disabled{opacity:.45;cursor:not-allowed}
 .tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);margin-left:6px}
 @media (max-width:600px){
   main{padding:12px}
@@ -399,6 +404,8 @@ async function rotear() {
   await flush();
   const [, nome, id] = location.hash.match(/^#\/([a-z]+)(?:\/([a-z0-9]+))?/i) || [];
   if (anterior && !(nome === 'vistoria' && id === anterior.id) && vazia(anterior)) await dbDel(anterior.id);
+  // sem o aceite da versão atual dos Termos, nenhuma outra tela é aberta
+  if (!(await termosAceitos())) { cur = null; scrollTo(0, 0); return telaTermos(true); }
   if (nome === 'vistoria' && id) {
     if (!cur || cur.id !== id) {
       const v = await dbGet(id);
@@ -441,10 +448,14 @@ async function telaInicio() {
   atualizarInstalar();
 }
 
+// A data da versão identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
 const TERMOS_DATA = '30/09/2026';
-function telaTermos() {
-  topo('Termos de Uso', 'inicio');
+const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_DATA; };
+async function telaTermos(exigirAceite = false) {
+  topo('Termos de Uso', exigirAceite ? null : 'inicio');
+  const aceite = exigirAceite ? null : await cfgLer('aceite');
   app.innerHTML = `
+  ${exigirAceite ? '<p class="aviso">👋 Antes de começar, leia e aceite os Termos de Uso. Isso é pedido uma única vez e novamente só quando os Termos forem alterados.</p>' : ''}
   <article class="card termos">
     <h2>Termos de Uso e Responsabilidades</h2>
     <p class="muted">Versão de ${TERMOS_DATA}.</p>
@@ -486,10 +497,16 @@ function telaTermos() {
     <h3>9. Alterações destes Termos</h3>
     <p>Estes Termos podem ser alterados a qualquer tempo, com a publicação da nova versão nesta página. O uso continuado do aplicativo após a alteração implica a aceitação da versão vigente.</p>
 
-    <h3>10. Legislação aplicável</h3>
-    <p>Estes Termos são regidos pelas leis da República Federativa do Brasil.</p>
+    <h3>10. Legislação aplicável e foro</h3>
+    <p>Estes Termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da Comarca da Capital do Estado do Rio de Janeiro (cidade do Rio de Janeiro/RJ) para dirimir quaisquer controvérsias deles decorrentes, ressalvadas as hipóteses em que a lei estabeleça competência diversa.</p>
   </article>
-  <p style="text-align:center"><a class="btn" href="#/inicio">← Voltar à tela inicial</a></p>`;
+  ${exigirAceite ? `
+  <section class="card aceite">
+    <label class="check"><input type="checkbox" id="concordo"> <span>Li e concordo com os <strong>Termos de Uso e Responsabilidades</strong> acima.</span></label>
+    <button class="btn primary" data-act="aceitar" disabled>Aceitar e continuar</button>
+  </section>` : `
+  <p class="muted" style="text-align:center">${aceite ? `Você aceitou esta versão em ${new Date(aceite.em).toLocaleString('pt-BR')}.` : ''}</p>
+  <p style="text-align:center"><a class="btn" href="#/inicio">← Voltar à tela inicial</a></p>`}`;
 }
 
 async function telaVistorias() {
@@ -789,6 +806,7 @@ app.addEventListener('input', e => {
 
 app.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'concordo') { $('[data-act=aceitar]').disabled = !t.checked; return; }
   if (t.dataset.cf === 'nome') {
     // ao sair do campo de nome: renumera os demais e atualiza só os rótulos das abas
     // (sem redesenhar a tela, para não perder o clique que tirou o foco do campo)
@@ -872,6 +890,11 @@ app.addEventListener('click', async e => {
       const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() });
       flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + v.id); break;
     }
+    case 'aceitar':
+      if (!$('#concordo').checked) return;
+      await cfgGravar({ id: 'aceite', versao: TERMOS_DATA, em: Date.now() });
+      flash('Termos aceitos ✓', 3000);
+      rotear(); break;
     case 'escolherpasta':
       if (await escolherPasta(d.id)) { flash('Pasta definida ✓', 3000); telaConfig(); }
       break;
