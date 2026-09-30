@@ -39,6 +39,13 @@ a.btn{text-decoration:none}
 .aviso{background:var(--chip);border-radius:8px;padding:10px 12px;font-size:14px}
 .busca{margin-bottom:8px}
 .rodape{margin:28px 0 8px;padding-top:14px;border-top:1px solid var(--line);text-align:center;font-size:12px;line-height:1.6;color:var(--muted)}
+.rodape a{color:var(--pri);font-weight:600}
+.termos{line-height:1.6}
+.termos h2{font-size:17px}
+.termos h3{border-top:0;padding-top:0;margin:22px 0 6px;font-size:15px}
+.termos p,.termos li{text-align:justify}
+.termos ol{padding-left:22px}
+.termos .destaque{background:var(--chip);border-radius:8px;padding:10px 12px}
 .tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);margin-left:6px}
 @media (max-width:600px){
   main{padding:12px}
@@ -402,13 +409,13 @@ async function rotear() {
   }
   cur = null;
   scrollTo(0, 0);
-  const telas = { vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig };
+  const telas = { vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig, termos: telaTermos };
   (telas[nome] || telaInicio)();
 }
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.1';
+const VERSAO_APP = '1.2';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -428,9 +435,61 @@ async function telaInicio() {
   <footer class="rodape">
     © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.<br>
     Vistoria de Imóveis · versão ${VERSAO_APP}<br>
-    Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).
+    Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).<br>
+    <a href="#/termos">Termos de Uso e Responsabilidades</a>
   </footer>`;
   atualizarInstalar();
+}
+
+const TERMOS_DATA = '30/09/2026';
+function telaTermos() {
+  topo('Termos de Uso', 'inicio');
+  app.innerHTML = `
+  <article class="card termos">
+    <h2>Termos de Uso e Responsabilidades</h2>
+    <p class="muted">Versão de ${TERMOS_DATA}.</p>
+    <p class="destaque">Ao utilizar o aplicativo <strong>Vistoria de Imóveis</strong>, você declara ter lido, compreendido e aceitado integralmente estes Termos. Se não concordar com qualquer disposição, não utilize o aplicativo.</p>
+
+    <h3>1. Objeto</h3>
+    <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>
+
+    <h3>2. Armazenamento dos dados</h3>
+    <p>As vistorias, fotografias, dados pessoais e demais informações inseridas no aplicativo são armazenados <strong>exclusivamente no dispositivo do usuário</strong> (e, quando o próprio usuário assim escolher, em pastas ou serviços de terceiros por ele indicados). O desenvolvedor <strong>não recebe, não armazena, não acessa e não tem meios de recuperar</strong> essas informações.</p>
+
+    <h3>3. Proteção de dados pessoais (LGPD)</h3>
+    <p>O aplicativo permite o registro de dados pessoais de terceiros, como nomes, números de CPF/CNPJ, endereços e imagens de imóveis. Em relação a esses dados, o <strong>usuário é o único controlador</strong>, nos termos da Lei nº 13.709/2018 (Lei Geral de Proteção de Dados Pessoais – LGPD), cabendo-lhe exclusivamente:</p>
+    <ol>
+      <li>assegurar a existência de base legal adequada para o tratamento dos dados (art. 7º da LGPD) e utilizá-los apenas para finalidades legítimas, específicas e informadas aos titulares;</li>
+      <li>coletar somente os dados necessários à vistoria e evitar o registro de imagens de pessoas, documentos ou objetos pessoais desnecessários;</li>
+      <li>atender às solicitações dos titulares (acesso, correção, eliminação e demais direitos previstos no art. 18 da LGPD);</li>
+      <li>manter a segurança do dispositivo em que o aplicativo é utilizado (senha, bloqueio de tela, atualizações) e dos arquivos gerados;</li>
+      <li>responder pelo envio e compartilhamento de laudos, PDFs e arquivos para edição a terceiros, por qualquer meio (WhatsApp, e-mail, pastas compartilhadas, serviços de nuvem etc.);</li>
+      <li>eliminar os dados quando cessada a finalidade do tratamento, observados os prazos legais de guarda.</li>
+    </ol>
+    <p>Como não tem acesso aos dados inseridos, o desenvolvedor <strong>não atua como controlador nem como operador</strong> desses dados e não responde por seu tratamento, vazamento, perda ou uso indevido.</p>
+
+    <h3>4. Conteúdo dos laudos</h3>
+    <p>O usuário é integralmente responsável pela veracidade, exatidão e completude das informações, descrições e fotografias inseridas, bem como pela revisão do laudo antes de sua assinatura e utilização. Os textos padrão oferecidos pelo aplicativo (inclusive declarações e prazos) são <strong>meros modelos</strong>, não constituem aconselhamento jurídico e devem ser ajustados pelo usuário à legislação aplicável, ao contrato de locação e às circunstâncias de cada caso.</p>
+
+    <h3>5. Falhas, perda de dados e disponibilidade</h3>
+    <p>O aplicativo pode apresentar erros, falhas, incompatibilidades com determinados aparelhos ou navegadores, interrupções e alterações de funcionamento, inclusive em razão de atualizações automáticas. Os dados armazenados podem ser perdidos, entre outras hipóteses, pela limpeza dos dados do navegador, pela desinstalação do aplicativo, por defeito, perda, furto ou troca do aparelho. <strong>É responsabilidade exclusiva do usuário realizar cópias de segurança periódicas</strong> (função “Backup de todas”) e conferir cada laudo gerado. A disponibilidade do endereço de acesso depende de serviços de terceiros e pode ser suspensa ou encerrada a qualquer tempo, sem aviso prévio.</p>
+
+    <h3>6. Isenção de responsabilidade</h3>
+    <p>Na máxima extensão permitida pela legislação aplicável, <strong>o desenvolvedor fica isento de toda e qualquer responsabilidade</strong> por danos diretos ou indiretos, materiais ou morais, lucros cessantes, perda de dados, prejuízos decorrentes de falhas, erros ou indisponibilidade do aplicativo, bem como por quaisquer consequências do uso dos laudos, inclusive em negociações, cobranças, processos administrativos ou judiciais, e por atos do usuário ou de terceiros.</p>
+
+    <h3>7. Serviços e componentes de terceiros</h3>
+    <p>O aplicativo é hospedado no GitHub Pages e pode interagir com serviços de terceiros escolhidos pelo usuário (aplicativos de mensagens, e-mail, serviços de armazenamento em nuvem), regidos por seus próprios termos e políticas, pelos quais o desenvolvedor não responde. Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).</p>
+
+    <h3>8. Propriedade intelectual</h3>
+    <p>O aplicativo, seu código, layout e textos são de titularidade de ${TITULAR}. É concedida ao usuário licença gratuita, pessoal, não exclusiva e revogável de uso. É vedado copiar, modificar, redistribuir ou explorar comercialmente o aplicativo sem autorização prévia e por escrito do titular.</p>
+
+    <h3>9. Alterações destes Termos</h3>
+    <p>Estes Termos podem ser alterados a qualquer tempo, com a publicação da nova versão nesta página. O uso continuado do aplicativo após a alteração implica a aceitação da versão vigente.</p>
+
+    <h3>10. Legislação aplicável</h3>
+    <p>Estes Termos são regidos pelas leis da República Federativa do Brasil.</p>
+  </article>
+  <p style="text-align:center"><a class="btn" href="#/inicio">← Voltar à tela inicial</a></p>`;
 }
 
 async function telaVistorias() {
