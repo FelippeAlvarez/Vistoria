@@ -5,7 +5,7 @@
 // - Bibliotecas, ícones e manifesto: usa a cópia guardada; só busca na internet se faltar.
 //
 // Ao trocar bibliotecas ou ícones, aumente VERSAO para que os aparelhos baixem os arquivos novos.
-const VERSAO = 'v1';
+const VERSAO = 'v2';
 const CACHE = `vistoria-${VERSAO}`;
 const ARQUIVOS = [
   './',

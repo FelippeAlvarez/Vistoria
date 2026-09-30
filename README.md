@@ -2,7 +2,7 @@
 
 Aplicativo para elaborar **laudos de vistoria de imóveis para locação**: vistoria prévia (entrada) e vistoria de entrega de chaves, com descrição e fotos cômodo a cômodo e geração do laudo em PDF, pronto para assinatura.
 
-**Acesse:** https://felippealvarez.github.io/vistoria/
+**Acesse:** https://felippealvarez.github.io/Vistoria/
 
 Funciona no celular (Android e iPhone) e no computador, pode ser **instalado como aplicativo** e funciona **sem internet** depois de instalado.
 
@@ -20,6 +20,7 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 
 ## O que o aplicativo faz
 
+- **Tela inicial** com acesso direto a: nova vistoria prévia, nova vistoria de entrega, minhas vistorias, laudos de outras pessoas, cadastro do responsável e configurações.
 - **Dois tipos de vistoria:** prévia (entrada) e entrega de chaves. A partir de uma vistoria prévia, é possível criar a de entrega com os mesmos dados e cômodos.
 - **Dados do imóvel e das partes:** endereço (rua, número, complemento, bairro, cidade e UF), locatário e locador com CPF/CNPJ, vistoriador, contrato, chaves e leituras de água, energia e gás.
 - **Um cômodo por aba**, com estado geral, descrição e fotos com legenda (tiradas na hora pela câmera ou escolhidas da galeria). Cômodos repetidos são numerados automaticamente (Quarto 01, Quarto 02…).
@@ -27,7 +28,9 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 - **Declaração final editável** em cada vistoria, a partir de um texto padrão.
 - **Cabeçalho personalizado** com logo, nome e contato de quem elabora a vistoria.
 - **Laudo em PDF** com textos justificados, fotos numeradas, rubrica e numeração em todas as páginas e espaço para assinaturas. É possível **visualizar**, **salvar** e **compartilhar** (WhatsApp, e-mail etc.) o PDF.
-- **Backup** de cada vistoria em arquivo `.json`, que pode ser importado em outro aparelho.
+- **Pasta para salvar os PDFs** (no computador, com Chrome ou Edge). No celular, os PDFs vão para Downloads ou para onde você escolher ao compartilhar.
+- **Troca de laudos entre pessoas:** o botão **Enviar p/ edição** gera um arquivo do laudo (com fotos) que outra pessoa abre no aplicativo em **Laudos de outras pessoas** e continua editando. No computador, é possível usar uma **pasta compartilhada** (Google Drive, OneDrive ou Dropbox sincronizados): o aplicativo lista os laudos que estão nela e importa com um clique.
+- **Backup** de todas as vistorias num único arquivo, que pode ser importado em outro aparelho.
 
 ## Privacidade e armazenamento
 
@@ -35,7 +38,8 @@ As vistorias, fotos e dados pessoais **ficam guardados somente no aparelho** ond
 
 Por isso:
 
-- cada aparelho tem as suas próprias vistorias; para passar de um aparelho para outro, use **Backup (JSON)** e **Importar backup**;
+- cada aparelho tem as suas próprias vistorias; para passar de um aparelho para outro, use **Minhas vistorias → Backup de todas** e, no outro aparelho, **Laudos de outras pessoas → Importar arquivo**;
+- ao usar **Enviar p/ edição**, o arquivo do laudo contém os dados das partes e as fotos: envie apenas para quem deve ter acesso a eles;
 - limpar os dados do navegador ou desinstalar o aplicativo apaga as vistorias salvas; **faça backup com frequência**.
 
 ## Estrutura do projeto

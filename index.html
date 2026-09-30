@@ -18,9 +18,33 @@
 @media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18202b;--ink:#e2e8f0;--muted:#94a3b8;--line:#2b3746;--pri:#3b82f6;--danger:#f87171;--chip:#223043}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
-header h1{font-size:17px;margin:0}
-#status{font-size:13px;color:var(--muted)}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top));display:flex;gap:10px;align-items:center;min-height:52px}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.voltar{font-size:22px;line-height:1;text-decoration:none;color:var(--ink);padding:4px 10px 6px;border-radius:8px;border:1px solid var(--line)}
+#status{font-size:13px;color:var(--muted);text-align:right}
+a.btn{text-decoration:none}
+/* tela inicial */
+.saudacao{margin:4px 0 16px;color:var(--muted)}
+.menu{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:16px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;font:inherit;color:var(--ink);text-decoration:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;min-height:112px}
+.tile:hover{border-color:var(--pri)}
+.tile .ico{font-size:26px;line-height:1.2}
+.tile strong{font-size:15px}
+.tile small{color:var(--muted);font-size:13px}
+.tile.primary{background:var(--pri);border-color:var(--pri);color:#fff}
+.tile.primary small{color:rgba(255,255,255,.85)}
+/* barra de ações da vistoria */
+.acoes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.acoes .btn{justify-content:center}
+.aviso{background:var(--chip);border-radius:8px;padding:10px 12px;font-size:14px}
+.busca{margin-bottom:8px}
+.tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);margin-left:6px}
+@media (max-width:600px){
+  main{padding:12px}
+  .menu{grid-template-columns:1fr 1fr;gap:10px}
+  .tile{min-height:120px;padding:14px}
+  .acoes{grid-template-columns:1fr 1fr}
+}
 main{max-width:960px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
 h2{font-size:16px;margin:0 0 12px}
@@ -89,7 +113,11 @@ input.uf{text-transform:uppercase;text-align:center}
 </style>
 </head>
 <body>
-<header><h1>Vistoria de Imóveis</h1><div class="row"><span id="status"></span><button class="btn primary" id="instalar" hidden>⬇️ Instalar aplicativo</button></div></header>
+<header>
+  <a id="voltar" class="voltar" href="#/inicio" aria-label="Voltar" hidden>←</a>
+  <h1 id="titulo">Vistoria de Imóveis</h1>
+  <span id="status"></span>
+</header>
 <main id="app"></main>
 <script>
 // ---------- Armazenamento local (IndexedDB) ----------
@@ -160,7 +188,7 @@ const declaracaoPadrao = v => semLocatario(v) ? DECLARACAO.previaSemLocatario : 
 // texto efetivo: o ajustado pelo usuário nesta vistoria ou, se não houver, o padrão da opção escolhida
 const textoDeclaracao = v => (v.declaracao || '').trim() ? v.declaracao : declaracaoPadrao(v);
 
-function flash(msg) { const s = $('#status'); s.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => s.textContent = '', 1500); }
+function flash(msg, ms = 1500) { const s = $('#status'); s.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => s.textContent = '', ms); }
 function baixar(blob, nome) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = nome;
@@ -234,46 +262,302 @@ async function comprimir(file, max = 1600, q = 0.82, tipo = 'image/jpeg') {
   return { data: c.toDataURL(tipo, q), w, h };
 }
 
-// ---------- Telas ----------
-async function telaLista() {
+// ---------- Pastas no computador (Chrome/Edge) ----------
+// A escolha de pasta só existe nos navegadores de computador; no celular os arquivos vão para Downloads.
+const suportaPastas = 'showDirectoryPicker' in window;
+const cfgLer = id => tx('readonly', s => s.get(id), CONFIG);
+const cfgGravar = obj => tx('readwrite', s => s.put(obj), CONFIG);
+async function pasta(id) { const r = await cfgLer(id); return (r && r.handle) || null; }
+async function permitir(handle) {
+  const o = { mode: 'readwrite' };
+  if ((await handle.queryPermission(o)) === 'granted') return true;
+  return (await handle.requestPermission(o)) === 'granted';
+}
+async function escolherPasta(id) {
+  try {
+    const handle = await window.showDirectoryPicker({ id, mode: 'readwrite' });
+    await cfgGravar({ id, handle });
+    return handle;
+  } catch (err) {
+    if (err.name !== 'AbortError') alert('Não foi possível usar esta pasta: ' + err.message);
+    return null;
+  }
+}
+async function gravarNaPasta(handle, nome, blob) {
+  const fh = await handle.getFileHandle(nome, { create: true });
+  const w = await fh.createWritable();
+  await w.write(blob);
+  await w.close();
+}
+
+// ---------- Troca de laudos entre pessoas (arquivo para edição) ----------
+const FORMATO = 'vistoria-imoveis';
+const CAMPOS_TEXTO = ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc',
+  'locador', 'locadorDoc', 'vistoriador', 'chaves', 'agua', 'luz', 'gas', 'obs', 'declaracao'];
+const TXT = (x, max = 20000) => String(x ?? '').slice(0, max);
+const IMG_OK = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+// Arquivos recebidos de terceiros são tratados como dados não confiáveis: só os campos conhecidos
+// são aproveitados, e as fotos precisam ser imagens válidas (evita que um arquivo adulterado
+// injete código na página).
+function sanitizar(o) {
+  const v = novaVistoria(TIPOS[o.tipo] ? o.tipo : 'previa');
+  for (const k of CAMPOS_TEXTO) v[k] = TXT(o[k]);
+  if (o.endereco && !o.rua) v.rua = TXT(o.endereco);
+  v.uf = v.uf.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+  v.data = /^\d{4}-\d{2}-\d{2}$/.test(o.data) ? o.data : '';
+  v.acompanhou = o.acompanhou === 'nao' ? 'nao' : 'sim';
+  if (typeof o.id === 'string' && /^[a-z0-9]{4,40}$/i.test(o.id)) v.id = o.id;
+  v.criadoEm = Number(o.criadoEm) || Date.now();
+  v.atualizadoEm = Number(o.atualizadoEm) || Date.now();
+  v.comodos = (Array.isArray(o.comodos) ? o.comodos : []).slice(0, 300).filter(c => c && typeof c === 'object').map(c => ({
+    id: uid(),
+    nome: TXT(c.nome, 200),
+    base: typeof c.base === 'string' ? TXT(c.base, 200) : (c.base === null ? null : undefined),
+    estado: ESTADOS.includes(c.estado) ? c.estado : '',
+    descricao: TXT(c.descricao),
+    fotos: (Array.isArray(c.fotos) ? c.fotos : [])
+      .filter(f => f && typeof f.data === 'string' && IMG_OK.test(f.data)).slice(0, 500)
+      .map(f => ({ id: uid(), legenda: TXT(f.legenda, 500), data: f.data, w: Math.max(1, +f.w || 1), h: Math.max(1, +f.h || 1) }))
+  }));
+  return v;
+}
+async function pacote(vistorias) {
+  const cfg = await cfgGet();
+  return { formato: FORMATO, versao: 1, exportadoEm: new Date().toISOString(), autor: cfg.nome || '', vistorias };
+}
+// estrito: só aceita arquivos gerados pelo aplicativo (usado ao ler a pasta compartilhada)
+function lerPacote(texto, estrito = false) {
+  const d = JSON.parse(texto);
+  const doApp = d && d.formato === FORMATO && Array.isArray(d.vistorias);
+  if (estrito && !doApp) return null;
+  const lista = doApp ? d.vistorias : [].concat(d); // também aceita os backups das versões anteriores
+  const vistorias = lista.filter(v => v && typeof v === 'object' && Array.isArray(v.comodos)).map(sanitizar);
+  return { autor: doApp ? TXT(d.autor, 200) : '', vistorias };
+}
+const nomeArquivoLaudo = v => nomePDF(v).replace(/\.pdf$/, '.json');
+// Grava no aparelho; se já existe um laudo com o mesmo código (ex.: ele voltou de outra pessoa), pergunta.
+async function importar(v, origem) {
+  const existente = await dbGet(v.id);
+  if (existente) {
+    const substituir = confirm(`Já existe neste aparelho uma cópia do laudo "${enderecoCompleto(v) || 'sem endereço'}".\n\n` +
+      'OK = substituir pela versão do arquivo\nCancelar = importar como uma nova cópia');
+    if (!substituir) v.id = uid();
+  }
+  v.origem = origem;
+  await dbPut(v);
+  return v;
+}
+async function enviarParaEdicao(v) {
+  const blob = new Blob([JSON.stringify(await pacote([v]))], { type: 'application/json' });
+  const nome = nomeArquivoLaudo(v);
+  const h = suportaPastas ? await pasta('pastaCompart') : null;
+  if (h) {
+    try {
+      if (await permitir(h)) {
+        await gravarNaPasta(h, nome, blob);
+        alert(`Laudo enviado para a pasta compartilhada "${h.name}".\nQuem tiver acesso a essa pasta pode importá-lo em "Laudos de outras pessoas".`);
+        return;
+      }
+    } catch (err) { alert(`Não foi possível gravar na pasta "${h.name}" (${err.message}).`); }
+  }
+  // celular: envia pelo WhatsApp, e-mail etc. Alguns aparelhos só aceitam enviar como .txt.
+  const opcoes = [new File([blob], nome, { type: 'application/json' }), new File([blob], nome.replace(/\.json$/, '.txt'), { type: 'text/plain' })];
+  for (const arq of opcoes) {
+    if (navigator.canShare && navigator.canShare({ files: [arq] })) {
+      try {
+        await navigator.share({ files: [arq], title: 'Laudo de vistoria para edição', text: `Arquivo do aplicativo Vistoria de Imóveis - ${enderecoCompleto(v)}` });
+      } catch (err) { if (err.name !== 'AbortError') alert('Não foi possível enviar: ' + err.message); }
+      return;
+    }
+  }
+  baixar(blob, nome);
+  alert('O arquivo do laudo foi salvo no aparelho.\nEnvie-o para a outra pessoa, que deve abri-lo no aplicativo em "Laudos de outras pessoas" → "Importar arquivo".');
+}
+
+// ---------- Navegação entre telas ----------
+// Endereços: #/inicio, #/vistorias, #/recebidos, #/cadastro, #/config, #/vistoria/<código>
+// (assim o botão "voltar" do celular e do navegador funciona normalmente)
+const ir = rota => { location.hash = '#/' + rota; };
+function topo(titulo, voltarPara) {
+  $('#titulo').textContent = titulo;
+  const a = $('#voltar');
+  a.hidden = !voltarPara;
+  if (voltarPara) a.href = '#/' + voltarPara;
+}
+async function rotear() {
+  await flush();
+  const [, nome, id] = location.hash.match(/^#\/([a-z]+)(?:\/([a-z0-9]+))?/i) || [];
+  if (nome === 'vistoria' && id) {
+    if (!cur || cur.id !== id) {
+      const v = await dbGet(id);
+      if (!v) { ir('vistorias'); return; }
+      cur = migrar(v); tab = 0; scrollTo(0, 0);
+    }
+    return telaEditor();
+  }
   cur = null;
-  const all = (await dbAll()).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  scrollTo(0, 0);
+  const telas = { vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig };
+  (telas[nome] || telaInicio)();
+}
+window.addEventListener('hashchange', rotear);
+
+// ---------- Telas ----------
+async function telaInicio() {
+  topo('Vistoria de Imóveis', null);
+  const [todas, cfg] = await Promise.all([dbAll(), cfgGet()]);
+  app.innerHTML = `
+  <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
+  <div class="menu">
+    <button class="tile primary" data-act="nova" data-tipo="previa"><span class="ico">🏠</span><strong>Nova vistoria prévia</strong><small>Entrada do locatário</small></button>
+    <button class="tile primary" data-act="nova" data-tipo="entrega"><span class="ico">🔑</span><strong>Nova vistoria de entrega</strong><small>Devolução das chaves</small></button>
+    <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
+    <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
+    <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
+    <a class="tile" href="#/config"><span class="ico">⚙️</span><strong>Configurações</strong><small>Pastas dos PDFs e dos laudos</small></a>
+  </div>
+  <section class="card" id="card-instalar" hidden></section>`;
+  atualizarInstalar();
+}
+
+async function telaVistorias() {
+  topo('Minhas vistorias', 'inicio');
+  const todas = (await dbAll()).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  app.innerHTML = `
+  <div class="row between" style="margin-bottom:12px">
+    <div class="row">
+      <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia</button>
+      <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega</button>
+    </div>
+    ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias num único arquivo">💾 Backup de todas</button>' : ''}
+  </div>
+  <section class="card">
+    ${todas.length ? `
+    <input class="busca" type="search" data-busca placeholder="🔎 Buscar por endereço, locatário, locador…">
+    <ul class="lista">${todas.map(v => `
+      <li data-texto="${esc(chave([enderecoCompleto(v), v.cidade, v.locatario, v.locador, v.origem && v.origem.autor].join(' ')))}">
+        <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
+          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${v.locatario ? ' · ' + esc(v.locatario) : ''}</small>
+          ${v.origem ? `<small>📥 Recebida${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</small>` : ''}</div>
+        <div class="row">
+          <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
+          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>` : ''}
+          <button class="btn" data-act="enviar" data-id="${v.id}" title="Envia o laudo para outra pessoa continuar a edição">📨 Enviar p/ edição</button>
+          <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
+        </div>
+      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda. Comece uma nova pelos botões acima.</p>'}
+  </section>`;
+}
+
+async function telaCadastro() {
+  topo('Cadastro do responsável', 'inicio');
   const cfg = await cfgGet();
   app.innerHTML = `
   <section class="card">
-    <h2>Cabeçalho do laudo <small class="muted">(logo e identificação de quem elabora a vistoria; aparecem no topo de todos os PDFs)</small></h2>
+    <h2>Identificação de quem elabora a vistoria</h2>
+    <p class="muted" style="margin-top:0">O logo, o nome e o contato aparecem no topo de todos os laudos em PDF. Pode ser uma empresa, um corretor, um advogado ou o próprio locador.</p>
     <div class="cabecalho">
       <div class="logo-box">${cfg.logo ? `<img src="${cfg.logo.data}" alt="Logo">` : '<span class="muted">Sem logo</span>'}</div>
       <div class="grid">
         <label>Nome (pessoa ou empresa)<input data-cfg="nome" value="${esc(cfg.nome)}"></label>
-        <label class="full">Contato (registro profissional, endereço, telefone, e-mail…)<textarea data-cfg="contato" rows="2">${esc(cfg.contato)}</textarea></label>
+        <label class="full">Contato (registro profissional, endereço, telefone, e-mail…)<textarea data-cfg="contato" rows="3">${esc(cfg.contato)}</textarea></label>
         <div class="row full">
           <label class="btn">🖼️ ${cfg.logo ? 'Trocar logo' : 'Enviar logo'}<input type="file" accept="image/*" data-logo hidden></label>
           ${cfg.logo ? '<button class="btn danger" data-act="dellogo">Remover logo</button>' : ''}
         </div>
       </div>
     </div>
-  </section>
-  <section class="card">
-    <h2>Nova vistoria</h2>
-    <div class="row">
-      <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia (entrada)</button>
-      <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega de chaves</button>
-    </div>
-  </section>
-  <section class="card">
-    <div class="row between"><h2>Vistorias salvas</h2><button class="btn" data-act="importar">Importar backup</button></div>
-    ${all.length ? `<ul class="lista">${all.map(v => `
-      <li>
-        <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
-          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)</small></div>
-        <div class="row">
-          <button class="btn" data-act="abrir" data-id="${v.id}">Abrir</button>
-          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>` : ''}
-          <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
-        </div>
-      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda.</p>'}
+    <p class="muted">As alterações são salvas automaticamente.</p>
   </section>`;
+}
+
+async function telaConfig() {
+  topo('Configurações', 'inicio');
+  const [pPDF, pComp] = suportaPastas ? await Promise.all([pasta('pastaPDF'), pasta('pastaCompart')]) : [null, null];
+  const semSuporte = `<p class="aviso">Neste aparelho o navegador não permite escolher pastas${/android|iphone|ipad/i.test(navigator.userAgent) ? ' (é uma limitação dos celulares)' : ''}.
+    ${/iphone|ipad/i.test(navigator.userAgent) ? 'Use <strong>Compartilhar PDF → Salvar em Arquivos</strong> para escolher onde guardar.' : 'Os arquivos vão para a pasta <strong>Downloads</strong>; você também pode usar <strong>Compartilhar</strong> para enviá-los ao Drive ou a outra pasta.'}
+    No computador (Chrome ou Edge) esta opção fica disponível.</p>`;
+  const bloco = (id, h, vazio) => suportaPastas ? `
+    <p>${h ? `📁 Pasta escolhida: <strong>${esc(h.name)}</strong>` : vazio}</p>
+    <div class="row">
+      <button class="btn primary" data-act="escolherpasta" data-id="${id}">${h ? 'Trocar pasta' : 'Escolher pasta'}</button>
+      ${h ? `<button class="btn" data-act="removerpasta" data-id="${id}">Não usar pasta</button>` : ''}
+    </div>` : semSuporte;
+  app.innerHTML = `
+  <section class="card">
+    <h2>📄 Pasta para salvar os PDFs</h2>
+    <p class="muted" style="margin-top:0">Onde o botão "Salvar PDF" grava os laudos.</p>
+    ${bloco('pastaPDF', pPDF, 'Nenhuma pasta escolhida: os PDFs vão para a pasta <strong>Downloads</strong>.')}
+  </section>
+  <section class="card">
+    <h2>🤝 Pasta compartilhada de laudos</h2>
+    <p class="muted" style="margin-top:0">Para trabalhar em equipe: escolha uma pasta sincronizada e compartilhada com os colegas
+      (por exemplo, no <strong>Google Drive</strong>, <strong>OneDrive</strong> ou <strong>Dropbox</strong> instalados no computador).
+      O botão "Enviar p/ edição" grava o laudo nessa pasta, e os laudos que estiverem nela aparecem em "Laudos de outras pessoas".</p>
+    ${bloco('pastaCompart', pComp, 'Nenhuma pasta compartilhada escolhida.')}
+  </section>
+  <section class="card">
+    <h2>📱 Aplicativo</h2>
+    <p style="margin-top:0">${emApp() ? 'Aplicativo instalado neste aparelho ✓' : 'Você está usando pelo navegador.'}
+      As vistorias ficam guardadas somente neste aparelho: faça backup em "Minhas vistorias" → "Backup de todas".</p>
+  </section>`;
+}
+
+async function telaRecebidos() {
+  topo('Laudos de outras pessoas', 'inicio');
+  const h = suportaPastas ? await pasta('pastaCompart') : null;
+  app.innerHTML = `
+  <section class="card">
+    <h2>📥 Importar arquivo de laudo</h2>
+    <p class="muted" style="margin-top:0">Abra o arquivo que outra pessoa enviou pelo botão "Enviar p/ edição" (por WhatsApp, e-mail etc.).
+      Também serve para restaurar um backup.</p>
+    <button class="btn primary" data-act="importararquivo">Importar arquivo…</button>
+  </section>
+  <section class="card">
+    <h2>🤝 Laudos na pasta compartilhada</h2>
+    ${!suportaPastas ? '<p class="aviso">A pasta compartilhada só está disponível no computador (Chrome ou Edge). No celular, use "Importar arquivo" acima.</p>'
+      : !h ? '<p class="aviso">Nenhuma pasta compartilhada escolhida. Defina uma em <a href="#/config">Configurações</a>.</p>'
+      : `<div class="row between"><p style="margin:0">📁 <strong>${esc(h.name)}</strong></p><button class="btn" data-act="lerpasta">↻ Atualizar lista</button></div>
+         <div id="lista-pasta"><p class="muted">Lendo a pasta…</p></div>`}
+  </section>`;
+  if (h) listarPasta(h);
+}
+
+let laudosNaPasta = [];
+async function listarPasta(h) {
+  const alvo = $('#lista-pasta');
+  if (!alvo) return;
+  if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') {
+    alvo.innerHTML = `<p class="muted">É preciso permitir que o aplicativo acesse a pasta "${esc(h.name)}".</p>
+      <button class="btn primary" data-act="permitirpasta">Permitir acesso</button>`;
+    return;
+  }
+  alvo.innerHTML = '<p class="muted">Lendo a pasta…</p>';
+  const achados = [];
+  try {
+    for await (const [nome, fh] of h.entries()) {
+      if (fh.kind !== 'file' || !/\.(json|txt)$/i.test(nome)) continue;
+      try {
+        const f = await fh.getFile();
+        const p = lerPacote(await f.text(), true);
+        if (p) p.vistorias.forEach(v => achados.push({ v, autor: p.autor, arquivo: nome, mod: f.lastModified }));
+      } catch { /* arquivo que não é laudo: ignora */ }
+    }
+  } catch (err) {
+    alvo.innerHTML = `<p class="aviso">Não foi possível ler a pasta (${esc(err.message)}).</p>`;
+    return;
+  }
+  achados.sort((a, b) => b.mod - a.mod);
+  laudosNaPasta = achados;
+  const locais = new Set((await dbAll()).map(v => v.id));
+  alvo.innerHTML = achados.length ? `<ul class="lista">${achados.map((a, i) => `
+    <li>
+      <div><strong>${esc(enderecoCompleto(a.v) || '(sem endereço)')}</strong>${locais.has(a.v.id) ? '<span class="tag">já importado</span>' : ''}
+        <small>${TIPOS[a.v.tipo]} · ${fmtData(a.v.data)} · ${a.v.comodos.length} cômodo(s)${a.autor ? ' · por ' + esc(a.autor) : ''}</small>
+        <small>Arquivo ${esc(a.arquivo)} · alterado em ${new Date(a.mod).toLocaleString('pt-BR')}</small></div>
+      <button class="btn primary" data-act="importarpasta" data-i="${i}">Importar para edição</button>
+    </li>`).join('')}</ul>`
+    : '<p class="muted">Nenhum laudo nesta pasta ainda. Os laudos aparecem aqui quando alguém usa "Enviar p/ edição" com esta mesma pasta.</p>';
 }
 
 function inp(f, label, type = 'text', cls = '', attrs = '') {
@@ -282,16 +566,15 @@ function inp(f, label, type = 'text', cls = '', attrs = '') {
 
 function telaEditor() {
   const sy = scrollY, v = cur;
+  topo(v.tipo === 'entrega' ? 'Vistoria de entrega' : 'Vistoria prévia', 'vistorias');
   app.innerHTML = `
-  <div class="row between toolbar">
-    <button class="btn" data-act="voltar">← Vistorias</button>
-    <div class="row">
-      <button class="btn" data-act="backup">Backup (JSON)</button>
-      <button class="btn" data-act="previa">👁️ Visualizar</button>
-      <button class="btn" data-act="compartilhar">📤 Compartilhar</button>
-      <button class="btn primary" data-act="pdf">⬇️ Salvar PDF</button>
-    </div>
+  <div class="acoes">
+    <button class="btn" data-act="previa">👁️ Visualizar</button>
+    <button class="btn" data-act="compartilhar">📤 Compartilhar PDF</button>
+    <button class="btn primary" data-act="pdf">⬇️ Salvar PDF</button>
+    <button class="btn" data-act="enviar" data-id="${v.id}">📨 Enviar p/ edição</button>
   </div>
+  ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
   <section class="card">
     <h2>Dados da vistoria</h2>
     <div class="grid">
@@ -393,6 +676,11 @@ function painelComodo() {
 let cfgT = null, cfgPend = {};
 app.addEventListener('input', e => {
   const t = e.target;
+  if (t.hasAttribute('data-busca')) {
+    const q = chave(t.value);
+    app.querySelectorAll('.lista li[data-texto]').forEach(li => { li.hidden = q && !li.dataset.texto.includes(q); });
+    return;
+  }
   if (t.dataset.cfg) {
     cfgPend[t.dataset.cfg] = t.value;
     clearTimeout(cfgT);
@@ -440,7 +728,7 @@ app.addEventListener('change', async e => {
     try {
       const c = await cfgGet();
       c.logo = await comprimir(t.files[0], 800, 1, 'image/png'); // PNG preserva fundo transparente
-      await cfgPut(c); flash('Logo salvo ✓'); telaLista();
+      await cfgPut(c); flash('Logo salvo ✓'); telaCadastro();
     } catch { alert('Não foi possível ler a imagem do logo.'); }
     return;
   }
@@ -462,39 +750,71 @@ app.addEventListener('click', async e => {
   if (!b) return;
   const d = b.dataset;
   switch (d.act) {
-    case 'nova':
-      cur = novaVistoria(d.tipo); tab = 0; await dbPut(cur); telaEditor(); break;
-    case 'abrir':
-      cur = migrar(await dbGet(d.id)); tab = 0; telaEditor(); break;
+    case 'nova': {
+      const v = novaVistoria(d.tipo); await dbPut(v);
+      cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
+    }
     case 'derivar': {
       const o = migrar(await dbGet(d.id));
-      cur = novaVistoria('entrega');
-      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc', 'locador', 'locadorDoc', 'vistoriador']) cur[k] = o[k];
-      cur.comodos = o.comodos.map(c => novoComodo(c.nome, baseDe(c)));
-      tab = 0; await dbPut(cur); telaEditor(); break;
+      const v = novaVistoria('entrega');
+      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc', 'locador', 'locadorDoc', 'vistoriador']) v[k] = o[k];
+      v.comodos = o.comodos.map(c => novoComodo(c.nome, baseDe(c)));
+      await dbPut(v); cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
     }
     case 'excluir':
-      if (confirm('Excluir esta vistoria definitivamente? (faça um backup antes, se necessário)')) { await dbDel(d.id); telaLista(); }
+      if (confirm('Excluir esta vistoria definitivamente? (faça um backup antes, se necessário)')) { await dbDel(d.id); telaVistorias(); }
       break;
-    case 'importar': {
-      const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json';
+    case 'enviar': {
+      if (cur) await flush();
+      const v = cur && cur.id === d.id ? cur : migrar(await dbGet(d.id));
+      await enviarParaEdicao(v); break;
+    }
+    case 'backuptodas': {
+      const todas = await dbAll();
+      baixar(new Blob([JSON.stringify(await pacote(todas))], { type: 'application/json' }), `Backup-vistorias-${hoje()}.json`);
+      flash('Backup salvo ✓', 3000); break;
+    }
+    case 'importararquivo': {
+      const i = document.createElement('input');
+      i.type = 'file'; i.multiple = true; i.accept = '.json,.txt,application/json,text/plain';
       i.onchange = async () => {
-        try {
-          const dados = JSON.parse(await i.files[0].text());
-          for (const v of [].concat(dados)) { if (v && v.id && Array.isArray(v.comodos)) await dbPut(v); }
-          telaLista(); flash('Backup importado');
-        } catch { alert('Arquivo de backup inválido.'); }
+        const importadas = [];
+        for (const f of i.files) {
+          try {
+            const p = lerPacote(await f.text());
+            for (const v of p.vistorias) importadas.push(await importar(v, { autor: p.autor, arquivo: f.name, em: Date.now() }));
+          } catch { alert(`O arquivo "${f.name}" não é um laudo válido deste aplicativo.`); }
+        }
+        if (importadas.length === 1) { flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + importadas[0].id); }
+        else if (importadas.length) { flash(`${importadas.length} laudos importados ✓`, 3000); ir('vistorias'); }
       };
       i.click(); break;
     }
-    case 'voltar':
-      await flush(); telaLista(); break;
-    case 'backup':
-      await flush();
-      baixar(new Blob([JSON.stringify(cur)], { type: 'application/json' }), `Vistoria-${cur.tipo}-${slug(enderecoCompleto(cur)) || 'imovel'}-${cur.data}.json`);
+    case 'lerpasta': case 'permitirpasta': {
+      const h = await pasta('pastaCompart'); if (!h) return;
+      if (d.act === 'permitirpasta') { try { await permitir(h); } catch (err) { alert(err.message); } }
+      listarPasta(h); break;
+    }
+    case 'importarpasta': {
+      const a = laudosNaPasta[+d.i]; if (!a) return;
+      const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() });
+      flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + v.id); break;
+    }
+    case 'escolherpasta':
+      if (await escolherPasta(d.id)) { flash('Pasta definida ✓', 3000); telaConfig(); }
       break;
+    case 'removerpasta':
+      await tx('readwrite', s => s.delete(d.id), CONFIG); telaConfig(); break;
+    case 'instalar':
+      if (!pedidoInstalacao) return;
+      pedidoInstalacao.prompt();
+      await pedidoInstalacao.userChoice;
+      pedidoInstalacao = null; atualizarInstalar(); break;
     case 'pdf': {
-      const doc = await montarPDF(); if (doc) doc.save(nomePDF(cur));
+      // pede a permissão da pasta antes de montar o PDF, enquanto o clique ainda vale como gesto do usuário
+      const h = suportaPastas ? await pasta('pastaPDF') : null;
+      if (h) { try { await permitir(h); } catch { /* salvarPDF trata */ } }
+      const doc = await montarPDF(); if (doc) await salvarPDF(doc, cur);
       break;
     }
     case 'compartilhar': {
@@ -507,7 +827,7 @@ app.addEventListener('click', async e => {
     }
     case 'dellogo': {
       if (!confirm('Remover o logo?')) return;
-      const c = await cfgGet(); c.logo = null; await cfgPut(c); telaLista(); break;
+      const c = await cfgGet(); c.logo = null; await cfgPut(c); telaCadastro(); break;
     }
     case 'restaurardecl':
       if ((cur.declaracao || '').trim() && !confirm('Descartar os ajustes e voltar ao texto padrão?')) return;
@@ -552,6 +872,24 @@ async function montarPDF() {
   catch (err) { console.error(err); alert('Erro ao gerar o PDF: ' + err.message); return null; }
 }
 
+// Grava na pasta escolhida em Configurações (computador); sem pasta, baixa para Downloads.
+async function salvarPDF(doc, v) {
+  const h = suportaPastas ? await pasta('pastaPDF') : null;
+  if (h) {
+    try {
+      if (await permitir(h)) {
+        await gravarNaPasta(h, nomePDF(v), doc.output('blob'));
+        flash(`PDF salvo na pasta "${h.name}" ✓`, 4000);
+        return;
+      }
+      alert('Sem permissão para gravar na pasta escolhida. O PDF será baixado para a pasta Downloads.');
+    } catch (err) {
+      alert(`Não foi possível gravar na pasta "${h.name}" (${err.message}). O PDF será baixado para a pasta Downloads.`);
+    }
+  }
+  doc.save(nomePDF(v));
+}
+
 async function compartilharPDF(doc, v) {
   const arquivo = new File([doc.output('blob')], nomePDF(v), { type: 'application/pdf' });
   if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
@@ -561,7 +899,7 @@ async function compartilharPDF(doc, v) {
       if (err.name !== 'AbortError') alert('Não foi possível compartilhar: ' + err.message); // AbortError = usuário cancelou
     }
   } else {
-    doc.save(nomePDF(v));
+    await salvarPDF(doc, v);
     alert('Este navegador não permite compartilhar arquivos diretamente.\nO PDF foi salvo no aparelho; anexe-o pelo WhatsApp, e-mail etc.');
   }
 }
@@ -600,7 +938,7 @@ async function abrirPrevia(doc, v) {
   ov.addEventListener('click', e => {
     const a = e.target.closest('[data-p]'); if (!a) return;
     if (a.dataset.p === 'fechar') fechar();
-    if (a.dataset.p === 'salvar') doc.save(nomePDF(v));
+    if (a.dataset.p === 'salvar') salvarPDF(doc, v);
     if (a.dataset.p === 'compartilhar') compartilharPDF(doc, v);
   });
   const area = ov.querySelector('.previa-paginas');
@@ -835,19 +1173,33 @@ function gerarPDF(v, cfg) {
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker não registrado:', err));
 }
-// Chrome/Edge/Android oferecem a instalação por este evento; o botão só aparece quando é possível instalar.
-let pedidoInstalacao = null;
-const btnInstalar = $('#instalar');
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalacao = e; btnInstalar.hidden = false; });
-btnInstalar.addEventListener('click', async () => {
-  if (!pedidoInstalacao) return;
-  pedidoInstalacao.prompt();
-  await pedidoInstalacao.userChoice;
-  pedidoInstalacao = null; btnInstalar.hidden = true;
+// A sugestão de instalar só aparece na tela inicial, e nunca quando o programa já está
+// rodando como aplicativo instalado ou quando o aparelho informa que ele já está instalado.
+const emApp = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: window-controls-overlay)').matches || navigator.standalone === true;
+const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+let pedidoInstalacao = null, jaInstalado = false;
+function atualizarInstalar() {
+  const c = $('#card-instalar');
+  if (!c) return;
+  const mostrar = !emApp() && !jaInstalado && (pedidoInstalacao || ehIOS);
+  c.hidden = !mostrar;
+  if (!mostrar) return;
+  c.innerHTML = pedidoInstalacao
+    ? `<div class="row between"><div><strong>📲 Instale o aplicativo</strong><div class="muted">Ícone próprio, tela cheia e funciona sem internet.</div></div>
+       <button class="btn primary" data-act="instalar">Instalar</button></div>`
+    : `<strong>📲 Instale o aplicativo</strong><div class="muted">No Safari, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</div>`;
+}
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  if (emApp()) return;
+  pedidoInstalacao = e; atualizarInstalar();
 });
-window.addEventListener('appinstalled', () => { btnInstalar.hidden = true; flash('Aplicativo instalado ✓'); });
+window.addEventListener('appinstalled', () => { pedidoInstalacao = null; jaInstalado = true; atualizarInstalar(); flash('Aplicativo instalado ✓', 3000); });
+if (navigator.getInstalledRelatedApps) {
+  navigator.getInstalledRelatedApps().then(l => { if (l.length) { jaInstalado = true; atualizarInstalar(); } }).catch(() => {});
+}
 
-telaLista();
+rotear();
 </script>
 </body>
 </html>
