@@ -22,7 +22,7 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 
 - **Tela inicial** com acesso direto a: nova vistoria prévia, nova vistoria de entrega, minhas vistorias, laudos de outras pessoas, cadastro do responsável e configurações.
 - **Dois tipos de vistoria:** prévia (entrada) e entrega de chaves. A partir de uma vistoria prévia, é possível criar a de entrega com os mesmos dados e cômodos.
-- **Dados do imóvel e das partes:** endereço (rua, número, complemento, bairro, cidade e UF), locatário e locador com CPF/CNPJ, vistoriador, contrato, chaves e leituras de água, energia e gás.
+- **Dados do imóvel e das partes:** endereço do imóvel (rua, número, complemento, bairro, cidade e UF); **um ou mais locadores e locatários e, se houver, fiadores**, cada um com CPF/CNPJ e endereço (com opção de repetir o endereço do primeiro da mesma categoria); vistoriador, contrato, chaves e leituras de água, energia e gás. Todas as partes ganham linha de assinatura no laudo.
 - **Um cômodo por aba**, com estado geral, descrição e fotos com legenda (tiradas na hora pela câmera ou escolhidas da galeria). Cômodos repetidos são numerados automaticamente (Quarto 01, Quarto 02…).
 - **Ditado por voz** (botão 🎤) na descrição dos cômodos, nas legendas das fotos e nas observações gerais. Usa o reconhecimento de voz do navegador (Chrome, Edge ou Safari) e **só funciona com internet**.
 - **Acompanhamento da vistoria prévia:** indica se o locatário acompanhou ou não; se não acompanhou, o laudo informa o prazo de 10 dias para manifestar discordância.

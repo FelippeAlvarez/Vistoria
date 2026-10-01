@@ -86,6 +86,10 @@ figure img{width:100%;height:140px;object-fit:cover;display:block}
 figure input{border:0;border-top:1px solid var(--line);border-radius:0;font-size:13px}
 figure .legenda{display:flex;align-items:stretch;border-top:1px solid var(--line)}
 figure .legenda input{border-top:0;min-width:0}
+/* partes (locadores, locatários, fiadores) */
+.parte{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;display:flex;flex-direction:column;gap:10px}
+.parte-topo .btn{padding:4px 10px;font-size:13px}
+.end-repetido{margin:0;font-size:14px}
 /* ditado por voz */
 .voz{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .voz-status{font-size:13px;color:var(--muted)}
@@ -199,14 +203,42 @@ const enderecoCompleto = v => v.rua
   ? `${v.rua}${v.numero ? ', ' + v.numero : ''}${v.complemento ? ' - ' + v.complemento : ''}${v.bairro ? ' - ' + v.bairro : ''}`
   : (v.endereco || '');
 const cidadeUF = v => [v.cidade, v.uf].filter(Boolean).join('/');
-// vistorias criadas até a v03 tinham o endereço num campo único
+
+// Partes: um ou mais locadores e locatários (sempre ao menos um) e zero ou mais fiadores.
+const CATEGORIAS = {
+  locadores: { um: 'Locador(a)', grupo: 'Locador(es)', add: 'locador(a)', assina: 'LOCADOR(A) OU REPRESENTANTE' },
+  locatarios: { um: 'Locatário(a)', grupo: 'Locatário(s)', add: 'locatário(a)', assina: 'LOCATÁRIO(A)' },
+  fiadores: { um: 'Fiador(a)', grupo: 'Fiador(es)', add: 'fiador(a)', assina: 'FIADOR(A)' }
+};
+const CAMPOS_PARTE = ['nome', 'doc', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf'];
+const novaParte = () => ({ nome: '', doc: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', mesmoEndereco: false });
+const partesIniciais = () => ({ locadores: [novaParte()], locatarios: [novaParte()], fiadores: [] });
+const rotuloParte = (cat, i) => CATEGORIAS[cat].um + (cur && cur.partes[cat].length > 1 ? ' ' + (i + 1) : '');
+// a partir do 2º de cada categoria, pode-se repetir o endereço do 1º
+const enderecoParte = (lista, i) => {
+  const p = i > 0 && lista[i].mesmoEndereco ? lista[0] : lista[i];
+  return [enderecoCompleto(p), cidadeUF(p)].filter(Boolean).join(' - ');
+};
+const nomesDe = (v, cat) => ((v.partes && v.partes[cat]) || []).map(p => p.nome).filter(Boolean);
+
 function migrar(v) {
-  if (v && v.endereco && !v.rua) { v.rua = v.endereco; }
-  if (v) delete v.endereco;
+  if (!v) return v;
+  // vistorias criadas até a v03 tinham o endereço num campo único
+  if (v.endereco && !v.rua) v.rua = v.endereco;
+  delete v.endereco;
+  // até a versão 1.3 havia um único locador e um único locatário, sem endereço
+  if (!v.partes) {
+    v.partes = partesIniciais();
+    Object.assign(v.partes.locadores[0], { nome: v.locador || '', doc: v.locadorDoc || '' });
+    Object.assign(v.partes.locatarios[0], { nome: v.locatario || '', doc: v.locatarioDoc || '' });
+  }
+  for (const k of ['locador', 'locadorDoc', 'locatario', 'locatarioDoc']) delete v[k];
   return v;
 }
 const semLocatario = v => v.tipo === 'previa' && v.acompanhou === 'nao';
-const declaracaoPadrao = v => semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo];
+const temFiador = v => !!(v.partes && v.partes.fiadores.length);
+const declaracaoPadrao = v => (semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo]) +
+  (temFiador(v) ? ' O(A)(S) FIADOR(A)(ES) declara(m) ter ciência do inteiro teor do presente laudo.' : '');
 // texto efetivo: o ajustado pelo usuário nesta vistoria ou, se não houver, o padrão da opção escolhida
 const textoDeclaracao = v => (v.declaracao || '').trim() ? v.declaracao : declaracaoPadrao(v);
 
@@ -221,8 +253,8 @@ function baixar(blob, nome) {
 // ---------- Estado ----------
 let cur = null, tab = 0, saveT = null;
 function novaVistoria(tipo) {
-  return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '', locatario: '', locatarioDoc: '',
-    locador: '', locadorDoc: '', vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
+  return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '',
+    partes: partesIniciais(), vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
     comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
 }
 // "base" = tipo do cômodo (Quarto, Banheiro…), usado na numeração automática.
@@ -314,8 +346,28 @@ async function gravarNaPasta(handle, nome, blob) {
 
 // ---------- Troca de laudos entre pessoas (arquivo para edição) ----------
 const FORMATO = 'vistoria-imoveis';
-const CAMPOS_TEXTO = ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc',
-  'locador', 'locadorDoc', 'vistoriador', 'chaves', 'agua', 'luz', 'gas', 'obs', 'declaracao'];
+const CAMPOS_TEXTO = ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato',
+  'vistoriador', 'chaves', 'agua', 'luz', 'gas', 'obs', 'declaracao'];
+const limparUF = s => String(s || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+function sanitizarPartes(o) {
+  if (!o.partes || typeof o.partes !== 'object') { // arquivo de versão anterior: um locador e um locatário
+    const p = partesIniciais();
+    p.locadores[0].nome = TXT(o.locador, 300); p.locadores[0].doc = TXT(o.locadorDoc, 40);
+    p.locatarios[0].nome = TXT(o.locatario, 300); p.locatarios[0].doc = TXT(o.locatarioDoc, 40);
+    return p;
+  }
+  const lista = l => (Array.isArray(l) ? l : []).slice(0, 20).filter(x => x && typeof x === 'object').map(x => {
+    const p = novaParte();
+    for (const k of CAMPOS_PARTE) p[k] = TXT(x[k], k === 'nome' ? 300 : 200);
+    p.uf = limparUF(p.uf);
+    p.mesmoEndereco = x.mesmoEndereco === true;
+    return p;
+  });
+  const r = { locadores: lista(o.partes.locadores), locatarios: lista(o.partes.locatarios), fiadores: lista(o.partes.fiadores) };
+  if (!r.locadores.length) r.locadores.push(novaParte());
+  if (!r.locatarios.length) r.locatarios.push(novaParte());
+  return r;
+}
 const TXT = (x, max = 20000) => String(x ?? '').slice(0, max);
 const IMG_OK = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
 // Arquivos recebidos de terceiros são tratados como dados não confiáveis: só os campos conhecidos
@@ -325,7 +377,8 @@ function sanitizar(o) {
   const v = novaVistoria(TIPOS[o.tipo] ? o.tipo : 'previa');
   for (const k of CAMPOS_TEXTO) v[k] = TXT(o[k]);
   if (o.endereco && !o.rua) v.rua = TXT(o.endereco);
-  v.uf = v.uf.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+  v.uf = limparUF(v.uf);
+  v.partes = sanitizarPartes(o);
   v.data = /^\d{4}-\d{2}-\d{2}$/.test(o.data) ? o.data : '';
   v.acompanhou = o.acompanhou === 'nao' ? 'nao' : 'sim';
   if (typeof o.id === 'string' && /^[a-z0-9]{4,40}$/i.test(o.id)) v.id = o.id;
@@ -505,7 +558,8 @@ function topo(titulo, voltarPara) {
   if (voltarPara) a.href = '#/' + voltarPara;
 }
 // vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
-const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim());
+const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim()) &&
+  !Object.values(v.partes || {}).flat().some(p => CAMPOS_PARTE.some(k => String(p[k] || '').trim()));
 async function rotear() {
   cancelarDitado();
   const anterior = cur;
@@ -530,7 +584,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.3';
+const VERSAO_APP = '1.4';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -633,7 +687,7 @@ async function telaTermos(exigirAceite = false) {
 
 async function telaVistorias() {
   topo('Minhas vistorias', 'inicio');
-  const todas = (await dbAll()).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  const todas = (await dbAll()).map(migrar).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
   app.innerHTML = `
   <div class="row between" style="margin-bottom:12px">
     <div class="row">
@@ -646,9 +700,9 @@ async function telaVistorias() {
     ${todas.length ? `
     <input class="busca" type="search" data-busca placeholder="🔎 Buscar por endereço, locatário, locador…">
     <ul class="lista">${todas.map(v => `
-      <li data-texto="${esc(chave([enderecoCompleto(v), v.cidade, v.locatario, v.locador, v.origem && v.origem.autor].join(' ')))}">
+      <li data-texto="${esc(chave([enderecoCompleto(v), v.cidade, ...nomesDe(v, 'locatarios'), ...nomesDe(v, 'locadores'), ...nomesDe(v, 'fiadores'), v.origem && v.origem.autor].join(' ')))}">
         <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
-          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${v.locatario ? ' · ' + esc(v.locatario) : ''}</small>
+          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${nomesDe(v, 'locatarios').length ? ' · ' + esc(nomesDe(v, 'locatarios').join(', ')) : ''}</small>
           ${v.origem ? `<small>📥 Recebida${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</small>` : ''}</div>
         <div class="row">
           <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
@@ -812,13 +866,25 @@ function telaEditor() {
       ${inp('uf', 'UF', 'text', 'c-num', 'maxlength="2" class="uf" autocapitalize="characters"')}
     </div>
 
-    <h3>Partes</h3>
+    <h3>${CATEGORIAS.locadores.grupo}</h3>
+    ${v.partes.locadores.map((p, i) => blocoParte('locadores', i)).join('')}
+    <div class="row"><button class="btn" data-act="addparte" data-cat="locadores">+ Adicionar ${CATEGORIAS.locadores.add}</button></div>
+
+    <h3>${CATEGORIAS.locatarios.grupo}</h3>
+    ${v.partes.locatarios.map((p, i) => blocoParte('locatarios', i)).join('')}
+    <div class="row">
+      <button class="btn" data-act="addparte" data-cat="locatarios">+ Adicionar ${CATEGORIAS.locatarios.add}</button>
+      ${v.partes.fiadores.length ? '' : `<button class="btn" data-act="addparte" data-cat="fiadores">+ Adicionar ${CATEGORIAS.fiadores.add}</button>`}
+    </div>
+
+    ${v.partes.fiadores.length ? `
+    <h3>${CATEGORIAS.fiadores.grupo}</h3>
+    ${v.partes.fiadores.map((p, i) => blocoParte('fiadores', i)).join('')}
+    <div class="row"><button class="btn" data-act="addparte" data-cat="fiadores">+ Adicionar ${CATEGORIAS.fiadores.add}</button></div>` : ''}
+
+    <h3>Vistoriador(a)</h3>
     <div class="g-partes">
-      ${inp('locatario', 'Locatário(a) — nome completo')}
-      ${inp('locatarioDoc', 'CPF/CNPJ do(a) locatário(a)')}
-      ${inp('locador', 'Locador(a) — nome completo')}
-      ${inp('locadorDoc', 'CPF/CNPJ do(a) locador(a)')}
-      ${inp('vistoriador', 'Vistoriador(a) — nome completo')}
+      ${inp('vistoriador', 'Nome completo')}
       <span></span>
     </div>
 
@@ -855,6 +921,38 @@ function telaEditor() {
     ${painelComodo()}
   </section>`;
   scrollTo(0, sy);
+}
+
+// Bloco de uma parte (locador, locatário ou fiador): nome, CPF/CNPJ e endereço.
+// Do 2º em diante, pode-se marcar "mesmo endereço do 1º".
+function blocoParte(cat, i) {
+  const lista = cur.partes[cat], p = lista[i];
+  const removivel = cat === 'fiadores' || i > 0;
+  const campo = (k, rotulo, cls = '', attrs = '') =>
+    `<label class="${cls}">${rotulo}<input data-p="${cat}.${i}.${k}" value="${esc(p[k])}" ${attrs}></label>`;
+  const repetido = i > 0 && p.mesmoEndereco;
+  return `<div class="parte" id="parte-${cat}-${i}">
+    <div class="row between parte-topo">
+      <strong>${rotuloParte(cat, i)}</strong>
+      ${removivel ? `<button class="btn danger" data-act="remparte" data-cat="${cat}" data-i="${i}">Remover</button>` : ''}
+    </div>
+    <div class="g-partes">
+      ${campo('nome', 'Nome completo')}
+      ${campo('doc', 'CPF/CNPJ')}
+    </div>
+    ${i > 0 ? `<label class="check"><input type="checkbox" data-pm="${cat}.${i}" ${repetido ? 'checked' : ''}>
+      <span>Mesmo endereço do(a) ${CATEGORIAS[cat].um.toLowerCase()} 1</span></label>` : ''}
+    ${repetido
+      ? `<p class="muted end-repetido" data-rep="${cat}">📍 ${esc(enderecoParte(lista, i) || 'O endereço do(a) ' + CATEGORIAS[cat].um.toLowerCase() + ' 1 ainda não foi preenchido.')}</p>`
+      : `<div class="g-end">
+      ${campo('rua', 'Endereço (rua / logradouro)', 'c-rua')}
+      ${campo('numero', 'Número', 'c-num', 'inputmode="numeric"')}
+      ${campo('complemento', 'Complemento', 'c-meio')}
+      ${campo('bairro', 'Bairro', 'c-meio')}
+      ${campo('cidade', 'Cidade', 'c-rua')}
+      ${campo('uf', 'UF', 'c-num', 'maxlength="2" class="uf" autocapitalize="characters"')}
+    </div>`}
+  </div>`;
 }
 
 function painelComodo() {
@@ -910,6 +1008,16 @@ app.addEventListener('input', e => {
     return;
   }
   if (!cur) return;
+  if (t.dataset.p) {
+    const [cat, i, k] = t.dataset.p.split('.');
+    if (k === 'uf') t.value = limparUF(t.value);
+    cur.partes[cat][+i][k] = t.value;
+    // quem repete o endereço do 1º vê a mudança na hora
+    if (+i === 0) app.querySelectorAll(`[data-rep="${cat}"]`).forEach(el => {
+      el.textContent = '📍 ' + (enderecoParte(cur.partes[cat], 0) || `O endereço do(a) ${CATEGORIAS[cat].um.toLowerCase()} 1 ainda não foi preenchido.`);
+    });
+    salvar(); return;
+  }
   if (t.dataset.f) {
     if (t.dataset.f === 'uf') t.value = t.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
     cur[t.dataset.f] = t.value;
@@ -937,6 +1045,11 @@ app.addEventListener('input', e => {
 app.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'concordo') { $('[data-act=aceitar]').disabled = !t.checked; return; }
+  if (t.dataset.pm) {
+    const [cat, i] = t.dataset.pm.split('.');
+    cur.partes[cat][+i].mesmoEndereco = t.checked;
+    salvar(); telaEditor(); return;
+  }
   if (t.dataset.cf === 'nome') {
     // ao sair do campo de nome: renumera os demais e atualiza só os rótulos das abas
     // (sem redesenhar a tela, para não perder o clique que tirou o foco do campo)
@@ -977,7 +1090,8 @@ app.addEventListener('click', async e => {
     case 'derivar': {
       const o = migrar(await dbGet(d.id));
       const v = novaVistoria('entrega');
-      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'locatario', 'locatarioDoc', 'locador', 'locadorDoc', 'vistoriador']) v[k] = o[k];
+      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato', 'vistoriador']) v[k] = o[k];
+      v.partes = structuredClone(o.partes);
       v.comodos = o.comodos.map(c => novoComodo(c.nome, baseDe(c)));
       await dbPut(v); cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
     }
@@ -1019,6 +1133,26 @@ app.addEventListener('click', async e => {
       const a = laudosNaPasta[+d.i]; if (!a) return;
       const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() });
       flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + v.id); break;
+    }
+    case 'addparte': {
+      const lista = cur.partes[d.cat];
+      lista.push(novaParte());
+      salvar(); telaEditor();
+      // abre direto o campo de nome da nova parte
+      const novo = app.querySelector(`[data-p="${d.cat}.${lista.length - 1}.nome"]`);
+      if (novo) { novo.scrollIntoView({ block: 'center' }); novo.focus({ preventScroll: true }); }
+      break;
+    }
+    case 'remparte': {
+      const lista = cur.partes[d.cat], i = +d.i, p = lista[i];
+      if (!confirm(`Remover ${rotuloParte(d.cat, i).toLowerCase()}${p.nome ? ` "${p.nome}"` : ''}?`)) return;
+      // se sai o 1º e o seguinte repetia o endereço dele, o seguinte herda o endereço
+      if (i === 0 && lista[1] && lista[1].mesmoEndereco) {
+        for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf']) lista[1][k] = p[k];
+        lista[1].mesmoEndereco = false;
+      }
+      lista.splice(i, 1);
+      salvar(); telaEditor(); break;
     }
     case 'ditar': {
       const mesmo = ditado && ditado.botao === b;
@@ -1197,6 +1331,7 @@ async function abrirPrevia(doc, v) {
 
 // ---------- PDF: montagem ----------
 function gerarPDF(v, cfg) {
+  migrar(v);
   if (!window.jspdf) { alert('A biblioteca de PDF não carregou. Verifique a conexão com a internet e recarregue a página.'); return null; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
@@ -1259,16 +1394,30 @@ function gerarPDF(v, cfg) {
     y += linhas.length * lh + 1.5;
   };
   // parte: nome e CPF/CNPJ em colunas fixas, para ficarem alinhados entre locatário e locador
-  const parte = (rotulo, nome, docu) => {
-    if (!nome && !docu) return;
+  // o endereço, quando houver, vai logo abaixo do nome, em letra menor
+  const parte = (rotulo, nome, docu, endereco) => {
+    if (!nome && !docu && !endereco) return;
     font(10);
     const linhas = quebrar(nome || '', 72), lh = 4.9;
-    ensure(linhas.length * lh + 1.5);
+    font(8.5);
+    const linhasEnd = endereco ? quebrar(endereco, CW - 52) : [], lhEnd = 3.9;
+    ensure(linhas.length * lh + linhasEnd.length * lhEnd + 2.5);
     font(10, 'bold'); doc.text(rotulo, M, y + 3.7);
     if (docu) doc.text('CPF/CNPJ:', M + 128, y + 3.7);
     font(10); linhas.forEach((l, i) => doc.text(l, M + 52, y + 3.7 + i * lh));
     if (docu) doc.text(docu, M + 148, y + 3.7);
-    y += linhas.length * lh + 1.5;
+    y += linhas.length * lh;
+    if (linhasEnd.length) {
+      font(8.5); doc.setTextColor(80);
+      linhasEnd.forEach((l, i) => doc.text(l, M + 52, y + 2.9 + i * lhEnd));
+      doc.setTextColor(0);
+      y += linhasEnd.length * lhEnd + 0.6;
+    }
+    y += 1.5;
+  };
+  const partesDe = cat => {
+    const lista = v.partes[cat];
+    lista.forEach((p, i) => parte(CATEGORIAS[cat].um + (lista.length > 1 ? ` ${i + 1}` : '') + ':', p.nome, p.doc, enderecoParte(lista, i)));
   };
 
   // Cabeçalho do laudo (logo, nome e contato de quem elabora a vistoria)
@@ -1299,8 +1448,9 @@ function gerarPDF(v, cfg) {
   campo('Cidade/UF:', cidadeUF(v));
   campo('Contrato/referência:', v.contrato);
   y += 2;
-  parte('Locatário(a):', v.locatario, v.locatarioDoc);
-  parte('Locador(a):', v.locador, v.locadorDoc);
+  partesDe('locadores');
+  partesDe('locatarios');
+  partesDe('fiadores');
   campo('Vistoriador(a):', v.vistoriador);
   y += 2;
   campo('Tipo de vistoria:', TIPOS[v.tipo]);
@@ -1373,8 +1523,13 @@ function gerarPDF(v, cfg) {
     font(9); doc.text(papel + (docu ? ` - CPF/CNPJ: ${docu}` : ''), W / 2, y + 9.5, { align: 'center' });
     y += 32;
   };
-  assinatura(v.locatario, 'LOCATÁRIO(A)', v.locatarioDoc);
-  assinatura(v.locador, 'LOCADOR(A) OU REPRESENTANTE', v.locadorDoc);
+  // uma linha para cada locatário, locador e fiador (fiador em branco não gera linha)
+  for (const cat of ['locatarios', 'locadores', 'fiadores']) {
+    v.partes[cat].forEach(p => {
+      if (cat === 'fiadores' && !p.nome && !p.doc) return;
+      assinatura(p.nome, CATEGORIAS[cat].assina, p.doc);
+    });
+  }
   assinatura(v.vistoriador, 'VISTORIADOR(A)');
 
   // Cabeçalho, rodapé e rubrica em todas as páginas
@@ -1392,7 +1547,7 @@ function gerarPDF(v, cfg) {
     doc.text(fmtData(v.data), W - M - (comLogo ? slw + 3 : 0), 10, { align: 'right' });
     doc.line(M, 12, W - M, 12);
     doc.line(M, H - 13, W - M, H - 13);
-    doc.text('Rubrica do(a) locatário(a): ______________________', M, H - 8);
+    doc.text('Rubricas: ______________________________', M, H - 8);
     doc.text(`Página ${p} de ${total}`, W - M, H - 8, { align: 'right' });
     doc.setTextColor(0);
   }
