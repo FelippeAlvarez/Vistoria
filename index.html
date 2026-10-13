@@ -191,28 +191,95 @@ const fmtData = s => s ? s.split('-').reverse().join('/') : '';
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const extenso = s => { if (!s) return ''; const [a, m, d] = s.split('-'); return `${+d} de ${MESES[m - 1]} de ${a}`; };
 const slug = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-const TIPOS = { previa: 'Vistoria prévia (entrada)', entrega: 'Vistoria de entrega de chaves' };
+const TIPOS = { previa: 'Vistoria prévia (entrada)', entrega: 'Vistoria de entrega de chaves', avaliacao: 'Laudo de avaliação de imóvel' };
+const ehAvaliacao = v => v.tipo === 'avaliacao';
 const ESTADOS = ['', 'Novo', 'Bom', 'Regular', 'Ruim'];
 const PRESETS = ['Sala', 'Cozinha', 'Quarto', 'Suíte', 'Banheiro', 'Lavabo', 'Área de serviço', 'Varanda', 'Garagem', 'Fachada / Área externa'];
 const DECLARACAO = {
   previa: 'O(A) LOCATÁRIO(A) declara que acompanhou a vistoria do imóvel acima identificado e que o presente laudo, composto pela descrição e pelo registro fotográfico de cada cômodo, retrata fielmente o estado em que o imóvel lhe é entregue no início da locação, obrigando-se a restituí-lo, ao término da locação, no mesmo estado, salvo as deteriorações decorrentes do seu uso normal (arts. 22, V, e 23, III, da Lei nº 8.245/91).',
   previaSemLocatario: 'A presente vistoria foi realizada sem o acompanhamento do(a) LOCATÁRIO(A). O(A) LOCATÁRIO(A) terá o prazo de 10 (dez) dias, contados do recebimento deste laudo, composto pela descrição e pelo registro fotográfico de cada cômodo, para manifestar por escrito eventual discordância quanto ao estado do imóvel nele descrito. Decorrido esse prazo sem manifestação, o laudo será considerado aceito em todos os seus termos. O(A) LOCATÁRIO(A) obriga-se a restituir o imóvel, ao término da locação, no mesmo estado em que o recebeu, conforme descrito neste laudo, salvo as deteriorações decorrentes do seu uso normal (arts. 22, V, e 23, III, da Lei nº 8.245/91).',
-  entrega: 'As partes declaram que, nesta data, o imóvel acima identificado foi devolvido e as chaves entregues, encontrando-se no estado descrito neste laudo e em seu registro fotográfico, que servirá de base para comparação com a vistoria de entrada e para a eventual apuração de responsabilidades.'
+  entrega: 'As partes declaram que, nesta data, o imóvel acima identificado foi devolvido e as chaves entregues, encontrando-se no estado descrito neste laudo e em seu registro fotográfico, que servirá de base para comparação com a vistoria de entrada e para a eventual apuração de responsabilidades.',
+  avaliacao: 'O(A) avaliador(a) signatário(a) declara que vistoriou pessoalmente o imóvel acima identificado na data indicada; que as informações, descrições e fotografias constantes deste laudo retratam o estado em que o imóvel se encontrava naquela ocasião; e que os valores indicados correspondem à sua estimativa, fundamentada na metodologia e nos elementos descritos, sujeita às limitações próprias da vistoria realizada.',
+  avaliacaoJudicial: ' Laudo elaborado para os fins do art. 872 do Código de Processo Civil.'
 };
+
+// ---------- Laudo de avaliação ----------
+const FINALIDADES = { judicial: 'Judicial', extrajudicial: 'Extrajudicial' };
+const OPCOES_AV = {
+  tipoImovel: ['', 'Apartamento', 'Casa', 'Casa em condomínio', 'Cobertura', 'Sala comercial', 'Loja', 'Galpão', 'Prédio', 'Terreno', 'Imóvel rural', 'Outro'],
+  uso: ['', 'Residencial', 'Comercial', 'Misto', 'Industrial', 'Rural', 'Institucional'],
+  padrao: ['', 'Baixo', 'Normal', 'Alto', 'Luxo'],
+  conservacao: ['', 'Novo', 'Bom', 'Regular', 'Necessita reparos simples', 'Necessita reparos importantes', 'Ruim'],
+  ocupacao: ['', 'Desocupado', 'Ocupado pelo proprietário', 'Locado', 'Ocupado por terceiros', 'Não verificado']
+};
+// campos guardados em v.av (todos texto)
+const CAMPOS_AV = ['finalidade', 'processo', 'vara', 'comarca', 'tipoImovel', 'uso', 'areaPrivativa', 'areaTotal', 'areaTerreno',
+  'pavimentos', 'andar', 'quartos', 'suites', 'banheiros', 'vagas', 'idade', 'padrao', 'conservacao', 'matricula', 'cartorio',
+  'inscricao', 'ocupacao', 'entorno', 'acompanhante', 'registroAvaliador', 'valorVenda', 'valorLocacao', 'metodologia'];
+const novaAv = () => Object.fromEntries(CAMPOS_AV.map(k => [k, k === 'finalidade' ? 'judicial' : '']));
+const ehJudicial = v => ehAvaliacao(v) && v.av.finalidade !== 'extrajudicial';
+
+// "1.234,56" -> 1234.56 ; texto vazio ou inválido -> null
+function numeroBR(s) {
+  let t = String(s || '').replace(/[^\d,.-]/g, '');
+  // sem vírgula e com ponto seguido de 1 ou 2 dígitos no final ("1250.5"): o ponto é o decimal
+  if (!t.includes(',') && /^\d+\.\d{1,2}$/.test(t)) t = t.replace('.', ',');
+  t = t.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(t);
+  return isFinite(n) ? n : null;
+}
+const moeda = n => n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// valor por extenso em reais (até bilhões), no padrão usado em laudos: "quatrocentos e cinquenta mil reais"
+function reaisPorExtenso(valor) {
+  const U = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze', 'quatorze',
+    'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+  const D = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+  const C = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+  const ate999 = n => {
+    if (n === 100) return 'cem';
+    const c = Math.floor(n / 100), r = n % 100, p = [];
+    if (c) p.push(C[c]);
+    if (r) p.push(r < 20 ? U[r] : D[Math.floor(r / 10)] + (r % 10 ? ' e ' + U[r % 10] : ''));
+    return p.join(' e ');
+  };
+  const inteiro = n => {
+    if (n === 0) return 'zero';
+    const grupos = []; for (let x = n; x > 0; x = Math.floor(x / 1000)) grupos.push(x % 1000);
+    const nomes = [null, ['mil', 'mil'], ['milhão', 'milhões'], ['bilhão', 'bilhões']];
+    const partes = [];
+    for (let g = grupos.length - 1; g >= 0; g--) {
+      const v = grupos[g]; if (!v) continue;
+      const t = g === 0 ? ate999(v) : g === 1 ? (v === 1 ? 'mil' : ate999(v) + ' mil') : ate999(v) + ' ' + nomes[g][v === 1 ? 0 : 1];
+      partes.push({ t, v, g });
+    }
+    // "e" antes do último grupo quando ele é menor que 100 ou centena exata (mil e duzentos; mil e cinquenta)
+    return partes.map((p, i) => i === 0 ? p.t : (i === partes.length - 1 && (p.v < 100 || p.v % 100 === 0) ? ' e ' : ' ') + p.t).join('');
+  };
+  const reais = Math.floor(Math.round(valor * 100) / 100), cent = Math.round(valor * 100) % 100;
+  const partes = [];
+  if (reais) partes.push(inteiro(reais) + (reais % 1000000 === 0 && reais >= 1000000 ? ' de' : '') + (reais === 1 ? ' real' : ' reais'));
+  if (cent) partes.push(inteiro(cent) + (cent === 1 ? ' centavo' : ' centavos'));
+  return partes.join(' e ') || 'zero real';
+}
 const enderecoCompleto = v => v.rua
   ? `${v.rua}${v.numero ? ', ' + v.numero : ''}${v.complemento ? ' - ' + v.complemento : ''}${v.bairro ? ' - ' + v.bairro : ''}`
   : (v.endereco || '');
 const cidadeUF = v => [v.cidade, v.uf].filter(Boolean).join('/');
 
-// Partes: um ou mais locadores e locatários (sempre ao menos um) e zero ou mais fiadores.
+// Partes de cada tipo de laudo. Nas categorias "opcional" a lista pode ficar vazia;
+// nas demais há sempre ao menos uma parte. "endereco: false" = só nome e CPF/CNPJ.
 const CATEGORIAS = {
   locadores: { um: 'Locador(a)', grupo: 'Locador(es)', add: 'locador(a)', assina: 'LOCADOR(A) OU REPRESENTANTE' },
   locatarios: { um: 'Locatário(a)', grupo: 'Locatário(s)', add: 'locatário(a)', assina: 'LOCATÁRIO(A)' },
-  fiadores: { um: 'Fiador(a)', grupo: 'Fiador(es)', add: 'fiador(a)', assina: 'FIADOR(A)' }
+  fiadores: { um: 'Fiador(a)', grupo: 'Fiador(es)', add: 'fiador(a)', assina: 'FIADOR(A)', opcional: true },
+  ativo: { um: 'Polo ativo', grupo: 'Polo ativo (autor / exequente / requerente)', add: 'parte no polo ativo', endereco: false },
+  passivo: { um: 'Polo passivo', grupo: 'Polo passivo (réu / executado / requerido)', add: 'parte no polo passivo', endereco: false },
+  solicitantes: { um: 'Solicitante', grupo: 'Solicitante(s)', add: 'solicitante', endereco: false },
+  proprietarios: { um: 'Proprietário(a)', grupo: 'Proprietário(s)', add: 'proprietário(a)', endereco: false, opcional: true }
 };
 const CAMPOS_PARTE = ['nome', 'doc', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf'];
 const novaParte = () => ({ nome: '', doc: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', mesmoEndereco: false });
-const partesIniciais = () => ({ locadores: [novaParte()], locatarios: [novaParte()], fiadores: [] });
+const partesIniciais = () => Object.fromEntries(Object.entries(CATEGORIAS).map(([k, c]) => [k, c.opcional ? [] : [novaParte()]]));
 const rotuloParte = (cat, i) => CATEGORIAS[cat].um + (cur && cur.partes[cat].length > 1 ? ' ' + (i + 1) : '');
 // a partir do 2º de cada categoria, pode-se repetir o endereço do 1º
 const enderecoParte = (lista, i) => {
@@ -233,12 +300,17 @@ function migrar(v) {
     Object.assign(v.partes.locatarios[0], { nome: v.locatario || '', doc: v.locatarioDoc || '' });
   }
   for (const k of ['locador', 'locadorDoc', 'locatario', 'locatarioDoc']) delete v[k];
+  // até a versão 1.4 não havia as partes e os campos do laudo de avaliação
+  for (const [k, c] of Object.entries(CATEGORIAS)) if (!Array.isArray(v.partes[k])) v.partes[k] = c.opcional ? [] : [novaParte()];
+  v.av = Object.assign(novaAv(), v.av || {});
   return v;
 }
 const semLocatario = v => v.tipo === 'previa' && v.acompanhou === 'nao';
 const temFiador = v => !!(v.partes && v.partes.fiadores.length);
-const declaracaoPadrao = v => (semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo]) +
-  (temFiador(v) ? ' O(A)(S) FIADOR(A)(ES) declara(m) ter ciência do inteiro teor do presente laudo.' : '');
+const declaracaoPadrao = v => ehAvaliacao(v)
+  ? DECLARACAO.avaliacao + (ehJudicial(v) ? DECLARACAO.avaliacaoJudicial : '')
+  : (semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo]) +
+    (temFiador(v) ? ' O(A)(S) FIADOR(A)(ES) declara(m) ter ciência do inteiro teor do presente laudo.' : '');
 // texto efetivo: o ajustado pelo usuário nesta vistoria ou, se não houver, o padrão da opção escolhida
 const textoDeclaracao = v => (v.declaracao || '').trim() ? v.declaracao : declaracaoPadrao(v);
 
@@ -254,7 +326,7 @@ function baixar(blob, nome) {
 let cur = null, tab = 0, saveT = null;
 function novaVistoria(tipo) {
   return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '',
-    partes: partesIniciais(), vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
+    partes: partesIniciais(), av: novaAv(), vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
     comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
 }
 // "base" = tipo do cômodo (Quarto, Banheiro…), usado na numeração automática.
@@ -363,10 +435,20 @@ function sanitizarPartes(o) {
     p.mesmoEndereco = x.mesmoEndereco === true;
     return p;
   });
-  const r = { locadores: lista(o.partes.locadores), locatarios: lista(o.partes.locatarios), fiadores: lista(o.partes.fiadores) };
-  if (!r.locadores.length) r.locadores.push(novaParte());
-  if (!r.locatarios.length) r.locatarios.push(novaParte());
+  const r = {};
+  for (const [k, c] of Object.entries(CATEGORIAS)) {
+    r[k] = lista(o.partes[k]);
+    if (!c.opcional && !r[k].length) r[k].push(novaParte());
+  }
   return r;
+}
+function sanitizarAv(o) {
+  const av = novaAv(), x = o.av && typeof o.av === 'object' ? o.av : {};
+  for (const k of CAMPOS_AV) if (k !== 'finalidade') av[k] = TXT(x[k], ['entorno', 'metodologia'].includes(k) ? 20000 : 300);
+  av.finalidade = x.finalidade === 'extrajudicial' ? 'extrajudicial' : 'judicial';
+  // campos de valor só com algarismos, pontos e vírgula
+  for (const k of ['valorVenda', 'valorLocacao']) if (!/^[\d.,\s]*$/.test(av[k])) av[k] = '';
+  return av;
 }
 const TXT = (x, max = 20000) => String(x ?? '').slice(0, max);
 const IMG_OK = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
@@ -379,6 +461,7 @@ function sanitizar(o) {
   if (o.endereco && !o.rua) v.rua = TXT(o.endereco);
   v.uf = limparUF(v.uf);
   v.partes = sanitizarPartes(o);
+  v.av = sanitizarAv(o);
   v.data = /^\d{4}-\d{2}-\d{2}$/.test(o.data) ? o.data : '';
   v.acompanhou = o.acompanhou === 'nao' ? 'nao' : 'sim';
   if (typeof o.id === 'string' && /^[a-z0-9]{4,40}$/i.test(o.id)) v.id = o.id;
@@ -559,7 +642,8 @@ function topo(titulo, voltarPara) {
 }
 // vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
 const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim()) &&
-  !Object.values(v.partes || {}).flat().some(p => CAMPOS_PARTE.some(k => String(p[k] || '').trim()));
+  !Object.values(v.partes || {}).flat().some(p => CAMPOS_PARTE.some(k => String(p[k] || '').trim())) &&
+  !CAMPOS_AV.some(k => k !== 'finalidade' && String((v.av || {})[k] || '').trim());
 async function rotear() {
   cancelarDitado();
   const anterior = cur;
@@ -584,7 +668,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.4';
+const VERSAO_APP = '1.5';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -595,7 +679,8 @@ async function telaInicio() {
   <div class="menu">
     <button class="tile primary" data-act="nova" data-tipo="previa"><span class="ico">🏠</span><strong>Nova vistoria prévia</strong><small>Entrada do locatário</small></button>
     <button class="tile primary" data-act="nova" data-tipo="entrega"><span class="ico">🔑</span><strong>Nova vistoria de entrega</strong><small>Devolução das chaves</small></button>
-    <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
+    <button class="tile primary" data-act="nova" data-tipo="avaliacao"><span class="ico">💰</span><strong>Nova avaliação de imóvel</strong><small>Laudo com valor de venda e/ou locação</small></button>
+    <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
     <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
     <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
     <a class="tile" href="#/config"><span class="ico">⚙️</span><strong>Configurações</strong><small>Pastas dos PDFs e dos laudos</small></a>
@@ -612,8 +697,8 @@ async function telaInicio() {
 
 // TERMOS_VERSAO identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
 // (a 1ª versão, de 30/09/2026, foi registrada com a versão "30/09/2026")
-const TERMOS_VERSAO = '30/09/2026-r2';
-const TERMOS_DATA = '30/09/2026 (revisão 2: ditado por voz)';
+const TERMOS_VERSAO = '13/10/2026';
+const TERMOS_DATA = '13/10/2026 (inclusão do laudo de avaliação)';
 const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_VERSAO; };
 async function telaTermos(exigirAceite = false) {
   topo('Termos de Uso', exigirAceite ? null : 'inicio');
@@ -626,7 +711,7 @@ async function telaTermos(exigirAceite = false) {
     <p class="destaque">Ao utilizar o aplicativo <strong>Vistoria de Imóveis</strong>, você declara ter lido, compreendido e aceitado integralmente estes Termos. Se não concordar com qualquer disposição, não utilize o aplicativo.</p>
 
     <h3>1. Objeto</h3>
-    <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>
+    <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação e de laudos de avaliação de imóveis, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>
 
     <h3>2. Armazenamento dos dados</h3>
     <p>As vistorias, fotografias, dados pessoais e demais informações inseridas no aplicativo são armazenados <strong>exclusivamente no dispositivo do usuário</strong> (e, quando o próprio usuário assim escolher, em pastas ou serviços de terceiros por ele indicados). O desenvolvedor <strong>não recebe, não armazena, não acessa e não tem meios de recuperar</strong> essas informações.</p>
@@ -646,6 +731,7 @@ async function telaTermos(exigirAceite = false) {
 
     <h3>4. Conteúdo dos laudos</h3>
     <p>O usuário é integralmente responsável pela veracidade, exatidão e completude das informações, descrições e fotografias inseridas, bem como pela revisão do laudo antes de sua assinatura e utilização. Os textos padrão oferecidos pelo aplicativo (inclusive declarações e prazos) são <strong>meros modelos</strong>, não constituem aconselhamento jurídico e devem ser ajustados pelo usuário à legislação aplicável, ao contrato de locação e às circunstâncias de cada caso.</p>
+    <p>Nos <strong>laudos de avaliação</strong>, os valores indicados, a metodologia, as premissas e as conclusões são <strong>estimativas de exclusiva responsabilidade do avaliador</strong>. O aplicativo limita-se a registrar as informações inseridas e a efetuar operações aritméticas simples (como o valor por metro quadrado e o valor por extenso); não realiza pesquisa ou estimativa de valor de mercado, não verifica a habilitação profissional do avaliador nem a observância de normas técnicas (como a ABNT NBR 14653) ou de exigências legais e processuais, e não substitui o trabalho técnico de profissional habilitado.</p>
 
     <h3>5. Falhas, perda de dados e disponibilidade</h3>
     <p>O aplicativo pode apresentar erros, falhas, incompatibilidades com determinados aparelhos ou navegadores, interrupções e alterações de funcionamento, inclusive em razão de atualizações automáticas. Os dados armazenados podem ser perdidos, entre outras hipóteses, pela limpeza dos dados do navegador, pela desinstalação do aplicativo, por defeito, perda, furto ou troca do aparelho. <strong>É responsabilidade exclusiva do usuário realizar cópias de segurança periódicas</strong> (função “Backup de todas”) e conferir cada laudo gerado. A disponibilidade do endereço de acesso depende de serviços de terceiros e pode ser suspensa ou encerrada a qualquer tempo, sem aviso prévio.</p>
@@ -686,23 +772,31 @@ async function telaTermos(exigirAceite = false) {
 }
 
 async function telaVistorias() {
-  topo('Minhas vistorias', 'inicio');
+  topo('Minhas vistorias e avaliações', 'inicio');
   const todas = (await dbAll()).map(migrar).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  // nomes exibidos e pesquisáveis de cada laudo
+  const pessoas = v => ehAvaliacao(v)
+    ? [...nomesDe(v, ehJudicial(v) ? 'ativo' : 'solicitantes'), ...nomesDe(v, ehJudicial(v) ? 'passivo' : 'proprietarios')]
+    : nomesDe(v, 'locatarios');
+  const busca = v => [enderecoCompleto(v), v.cidade, ...nomesDe(v, 'locatarios'), ...nomesDe(v, 'locadores'), ...nomesDe(v, 'fiadores'),
+    ...nomesDe(v, 'ativo'), ...nomesDe(v, 'passivo'), ...nomesDe(v, 'solicitantes'), ...nomesDe(v, 'proprietarios'), v.av.processo,
+    v.origem && v.origem.autor].join(' ');
   app.innerHTML = `
   <div class="row between" style="margin-bottom:12px">
     <div class="row">
       <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia</button>
       <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega</button>
+      <button class="btn primary" data-act="nova" data-tipo="avaliacao">+ Avaliação</button>
     </div>
     ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias num único arquivo">💾 Backup de todas</button>' : ''}
   </div>
   <section class="card">
     ${todas.length ? `
-    <input class="busca" type="search" data-busca placeholder="🔎 Buscar por endereço, locatário, locador…">
+    <input class="busca" type="search" data-busca placeholder="🔎 Buscar por endereço, nome das partes, nº do processo…">
     <ul class="lista">${todas.map(v => `
-      <li data-texto="${esc(chave([enderecoCompleto(v), v.cidade, ...nomesDe(v, 'locatarios'), ...nomesDe(v, 'locadores'), ...nomesDe(v, 'fiadores'), v.origem && v.origem.autor].join(' ')))}">
+      <li data-texto="${esc(chave(busca(v)))}">
         <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
-          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${nomesDe(v, 'locatarios').length ? ' · ' + esc(nomesDe(v, 'locatarios').join(', ')) : ''}</small>
+          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${ehAvaliacao(v) && v.av.processo ? ' · Proc. ' + esc(v.av.processo) : ''}${pessoas(v).length ? ' · ' + esc(pessoas(v).join(', ')) : ''}</small>
           ${v.origem ? `<small>📥 Recebida${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</small>` : ''}</div>
         <div class="row">
           <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
@@ -835,7 +929,7 @@ function inp(f, label, type = 'text', cls = '', attrs = '') {
 function telaEditor() {
   cancelarDitado();
   const sy = scrollY, v = cur;
-  topo(v.tipo === 'entrega' ? 'Vistoria de entrega' : 'Vistoria prévia', 'vistorias');
+  topo(ehAvaliacao(v) ? 'Laudo de avaliação' : v.tipo === 'entrega' ? 'Vistoria de entrega' : 'Vistoria prévia', 'vistorias');
   app.innerHTML = `
   <div class="acoes">
     <button class="btn" data-act="previa">👁️ Visualizar</button>
@@ -845,7 +939,7 @@ function telaEditor() {
   </div>
   ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
   <section class="card">
-    <h2>Dados da vistoria</h2>
+    <h2>${ehAvaliacao(v) ? 'Dados do laudo' : 'Dados da vistoria'}</h2>
     <div class="grid">
       <label>Tipo<select data-f="tipo">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === v.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       ${inp('data', 'Data da vistoria', 'date')}
@@ -853,48 +947,12 @@ function telaEditor() {
         <option value="sim" ${v.acompanhou !== 'nao' ? 'selected' : ''}>Sim, acompanhou</option>
         <option value="nao" ${v.acompanhou === 'nao' ? 'selected' : ''}>Não acompanhou (prazo de 10 dias)</option>
       </select></label>` : ''}
-      ${inp('contrato', 'Contrato / referência')}
+      ${ehAvaliacao(v) ? selAv('finalidade', 'Finalidade', Object.entries(FINALIDADES)) : ''}
+      ${inp('contrato', ehAvaliacao(v) ? 'Referência interna' : 'Contrato / referência')}
+      ${ehAvaliacao(v) ? inpAv('acompanhante', 'Vistoria acompanhada por (nome / qualidade)') : ''}
     </div>
 
-    <h3>Imóvel</h3>
-    <div class="g-end">
-      ${inp('rua', 'Rua / Logradouro', 'text', 'c-rua')}
-      ${inp('numero', 'Número', 'text', 'c-num', 'inputmode="numeric"')}
-      ${inp('complemento', 'Complemento', 'text', 'c-meio', 'placeholder="Apto, bloco, casa…"')}
-      ${inp('bairro', 'Bairro', 'text', 'c-meio')}
-      ${inp('cidade', 'Cidade', 'text', 'c-rua')}
-      ${inp('uf', 'UF', 'text', 'c-num', 'maxlength="2" class="uf" autocapitalize="characters"')}
-    </div>
-
-    <h3>${CATEGORIAS.locadores.grupo}</h3>
-    ${v.partes.locadores.map((p, i) => blocoParte('locadores', i)).join('')}
-    <div class="row"><button class="btn" data-act="addparte" data-cat="locadores">+ Adicionar ${CATEGORIAS.locadores.add}</button></div>
-
-    <h3>${CATEGORIAS.locatarios.grupo}</h3>
-    ${v.partes.locatarios.map((p, i) => blocoParte('locatarios', i)).join('')}
-    <div class="row">
-      <button class="btn" data-act="addparte" data-cat="locatarios">+ Adicionar ${CATEGORIAS.locatarios.add}</button>
-      ${v.partes.fiadores.length ? '' : `<button class="btn" data-act="addparte" data-cat="fiadores">+ Adicionar ${CATEGORIAS.fiadores.add}</button>`}
-    </div>
-
-    ${v.partes.fiadores.length ? `
-    <h3>${CATEGORIAS.fiadores.grupo}</h3>
-    ${v.partes.fiadores.map((p, i) => blocoParte('fiadores', i)).join('')}
-    <div class="row"><button class="btn" data-act="addparte" data-cat="fiadores">+ Adicionar ${CATEGORIAS.fiadores.add}</button></div>` : ''}
-
-    <h3>Vistoriador(a)</h3>
-    <div class="g-partes">
-      ${inp('vistoriador', 'Nome completo')}
-      <span></span>
-    </div>
-
-    <h3>Chaves e medidores</h3>
-    <div class="grid">
-      ${inp('chaves', 'Chaves (quantidade / descrição)')}
-      ${inp('agua', 'Leitura do hidrômetro (água)')}
-      ${inp('luz', 'Leitura do medidor de energia')}
-      ${inp('gas', 'Leitura do medidor de gás')}
-    </div>
+    ${ehAvaliacao(v) ? dadosAvaliacao(v) : dadosLocacao(v)}
 
     <h3>Textos do laudo</h3>
     <div class="grid">
@@ -923,14 +981,147 @@ function telaEditor() {
   scrollTo(0, sy);
 }
 
+// campos do laudo de avaliação (guardados em cur.av)
+function inpAv(k, rotulo, cls = '', attrs = '') {
+  return `<label class="${cls}">${rotulo}<input data-a="${k}" value="${esc(cur.av[k])}" ${attrs}></label>`;
+}
+function selAv(k, rotulo, opcoes, cls = '') {
+  const lista = opcoes.map(o => Array.isArray(o) ? o : [o, o || '—']);
+  return `<label class="${cls}">${rotulo}<select data-a="${k}">${lista.map(([val, txt]) =>
+    `<option value="${esc(val)}" ${val === cur.av[k] ? 'selected' : ''}>${esc(txt)}</option>`).join('')}</select></label>`;
+}
+const enderecoImovel = () => `
+    <h3>Imóvel</h3>
+    <div class="g-end">
+      ${inp('rua', 'Rua / Logradouro', 'text', 'c-rua')}
+      ${inp('numero', 'Número', 'text', 'c-num', 'inputmode="numeric"')}
+      ${inp('complemento', 'Complemento', 'text', 'c-meio', 'placeholder="Apto, bloco, casa…"')}
+      ${inp('bairro', 'Bairro', 'text', 'c-meio')}
+      ${inp('cidade', 'Cidade', 'text', 'c-rua')}
+      ${inp('uf', 'UF', 'text', 'c-num', 'maxlength="2" class="uf" autocapitalize="characters"')}
+    </div>`;
+// grupo de partes com o botão de adicionar; "extra" entra na mesma linha do botão
+const grupoPartes = (cat, extra = '') => `
+    <h3>${CATEGORIAS[cat].grupo}</h3>
+    ${cur.partes[cat].map((p, i) => blocoParte(cat, i)).join('')}
+    <div class="row"><button class="btn" data-act="addparte" data-cat="${cat}">+ Adicionar ${CATEGORIAS[cat].add}</button>${extra}</div>`;
+// categoria opcional ainda vazia: só o botão, ao lado do botão do grupo anterior
+const botaoAdd = cat => `<button class="btn" data-act="addparte" data-cat="${cat}">+ Adicionar ${CATEGORIAS[cat].add}</button>`;
+
+function dadosLocacao(v) {
+  return `${enderecoImovel()}
+    ${grupoPartes('locadores')}
+    ${grupoPartes('locatarios', v.partes.fiadores.length ? '' : botaoAdd('fiadores'))}
+    ${v.partes.fiadores.length ? grupoPartes('fiadores') : ''}
+
+    <h3>Vistoriador(a)</h3>
+    <div class="g-partes">
+      ${inp('vistoriador', 'Nome completo')}
+      <span></span>
+    </div>
+
+    <h3>Chaves e medidores</h3>
+    <div class="grid">
+      ${inp('chaves', 'Chaves (quantidade / descrição)')}
+      ${inp('agua', 'Leitura do hidrômetro (água)')}
+      ${inp('luz', 'Leitura do medidor de energia')}
+      ${inp('gas', 'Leitura do medidor de gás')}
+    </div>`;
+}
+
+// valor por m² mostrado ao lado dos valores (usa a área privativa; sem ela, a área total)
+function valorM2(v) {
+  const area = numeroBR(v.av.areaPrivativa) || numeroBR(v.av.areaTotal);
+  const calc = k => { const val = numeroBR(v.av[k]); return area && val ? `R$ ${moeda(val / area)}/m²` : ''; };
+  return { area, venda: calc('valorVenda'), locacao: calc('valorLocacao') };
+}
+function textoValorM2(v) {
+  const m = valorM2(v);
+  if (!m.area) return 'Informe a área privativa ou total para calcular o valor por m².';
+  return [m.venda && `Venda: ${m.venda}`, m.locacao && `Locação: ${m.locacao}`].filter(Boolean).join(' · ') || '';
+}
+
+function dadosAvaliacao(v) {
+  const judicial = ehJudicial(v);
+  return `
+    ${judicial ? `
+    <h3>Processo</h3>
+    <div class="grid">
+      ${inpAv('processo', 'Número do processo', '', 'inputmode="numeric" placeholder="0000000-00.0000.0.00.0000"')}
+      ${inpAv('vara', 'Juízo / Vara')}
+      ${inpAv('comarca', 'Comarca')}
+    </div>
+    ${grupoPartes('ativo')}
+    ${grupoPartes('passivo')}`
+    : `
+    ${grupoPartes('solicitantes', v.partes.proprietarios.length ? '' : botaoAdd('proprietarios'))}
+    ${v.partes.proprietarios.length ? grupoPartes('proprietarios') : ''}`}
+
+    ${enderecoImovel()}
+    <div class="grid" style="margin-top:12px">
+      ${inpAv('matricula', 'Matrícula nº')}
+      ${inpAv('cartorio', 'Cartório (RGI)')}
+      ${inpAv('inscricao', 'Inscrição municipal (IPTU)')}
+    </div>
+
+    <h3>Caracterização do imóvel</h3>
+    <div class="grid">
+      ${selAv('tipoImovel', 'Tipo de imóvel', OPCOES_AV.tipoImovel)}
+      ${selAv('uso', 'Uso', OPCOES_AV.uso)}
+      ${inpAv('areaPrivativa', 'Área privativa / útil (m²)', '', 'inputmode="decimal"')}
+      ${inpAv('areaTotal', 'Área total / construída (m²)', '', 'inputmode="decimal"')}
+      ${inpAv('areaTerreno', 'Área do terreno (m²)', '', 'inputmode="decimal"')}
+      ${inpAv('pavimentos', 'Nº de pavimentos', '', 'inputmode="numeric"')}
+      ${inpAv('andar', 'Andar (se unidade em prédio)', '', 'inputmode="numeric"')}
+      ${inpAv('quartos', 'Quartos', '', 'inputmode="numeric"')}
+      ${inpAv('suites', 'Suítes', '', 'inputmode="numeric"')}
+      ${inpAv('banheiros', 'Banheiros', '', 'inputmode="numeric"')}
+      ${inpAv('vagas', 'Vagas de garagem', '', 'inputmode="numeric"')}
+      ${inpAv('idade', 'Idade aproximada (anos)', '', 'inputmode="numeric"')}
+      ${selAv('padrao', 'Padrão de acabamento', OPCOES_AV.padrao)}
+      ${selAv('conservacao', 'Estado de conservação', OPCOES_AV.conservacao)}
+      ${selAv('ocupacao', 'Ocupação', OPCOES_AV.ocupacao)}
+      <label class="full">Entorno e infraestrutura (vizinhança, acesso, comércio, transporte, serviços públicos…)
+        <textarea data-a="entorno" rows="3">${esc(v.av.entorno)}</textarea></label>
+      ${botaoDitar('[data-a="entorno"]', 'full')}
+    </div>
+
+    <h3>Valores estimados pelo(a) avaliador(a)</h3>
+    <div class="grid">
+      ${inpAv('valorVenda', 'Valor de mercado para venda (R$)', '', 'inputmode="decimal" data-moeda placeholder="0,00"')}
+      ${inpAv('valorLocacao', 'Valor de locação mensal (R$)', '', 'inputmode="decimal" data-moeda placeholder="0,00"')}
+      <p class="muted full" id="valor-m2" style="margin:0">${esc(textoValorM2(v))}</p>
+      <label class="full">Metodologia e fundamentação (método utilizado, pesquisa de mercado, imóveis comparados, fatores considerados…)
+        <textarea data-a="metodologia" rows="5">${esc(v.av.metodologia)}</textarea></label>
+      ${botaoDitar('[data-a="metodologia"]', 'full')}
+    </div>
+
+    <h3>Avaliador(a)</h3>
+    <div class="g-partes">
+      ${inp('vistoriador', 'Nome completo')}
+      ${inpAv('registroAvaliador', 'Registro profissional (CRECI, CNAI, CREA, matrícula…)')}
+    </div>`;
+}
+
 // Bloco de uma parte (locador, locatário ou fiador): nome, CPF/CNPJ e endereço.
 // Do 2º em diante, pode-se marcar "mesmo endereço do 1º".
 function blocoParte(cat, i) {
   const lista = cur.partes[cat], p = lista[i];
-  const removivel = cat === 'fiadores' || i > 0;
+  const removivel = CATEGORIAS[cat].opcional || i > 0;
+  const comEndereco = CATEGORIAS[cat].endereco !== false;
   const campo = (k, rotulo, cls = '', attrs = '') =>
     `<label class="${cls}">${rotulo}<input data-p="${cat}.${i}.${k}" value="${esc(p[k])}" ${attrs}></label>`;
   const repetido = i > 0 && p.mesmoEndereco;
+  if (!comEndereco) return `<div class="parte" id="parte-${cat}-${i}">
+    <div class="row between parte-topo">
+      <strong>${rotuloParte(cat, i)}</strong>
+      ${removivel ? `<button class="btn danger" data-act="remparte" data-cat="${cat}" data-i="${i}">Remover</button>` : ''}
+    </div>
+    <div class="g-partes">
+      ${campo('nome', 'Nome completo')}
+      ${campo('doc', 'CPF/CNPJ')}
+    </div>
+  </div>`;
   return `<div class="parte" id="parte-${cat}-${i}">
     <div class="row between parte-topo">
       <strong>${rotuloParte(cat, i)}</strong>
@@ -1008,6 +1199,17 @@ app.addEventListener('input', e => {
     return;
   }
   if (!cur) return;
+  if (t.dataset.a) {
+    const k = t.dataset.a;
+    cur.av[k] = t.value;
+    if (k === 'finalidade') {
+      // a declaração padrão muda com a finalidade (menção ao art. 872 do CPC)
+      if ((cur.declaracao || '').trim() && confirm('O texto da declaração foi ajustado neste laudo. Deseja substituí-lo pelo texto padrão da nova finalidade?')) cur.declaracao = '';
+      salvar(); return telaEditor();
+    }
+    if (['valorVenda', 'valorLocacao', 'areaPrivativa', 'areaTotal'].includes(k)) { const el = $('#valor-m2'); if (el) el.textContent = textoValorM2(cur); }
+    salvar(); return;
+  }
   if (t.dataset.p) {
     const [cat, i, k] = t.dataset.p.split('.');
     if (k === 'uf') t.value = limparUF(t.value);
@@ -1045,6 +1247,14 @@ app.addEventListener('input', e => {
 app.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'concordo') { $('[data-act=aceitar]').disabled = !t.checked; return; }
+  if (t.hasAttribute('data-moeda')) {
+    // ao sair do campo de valor, formata: 450000 -> 450.000,00
+    const n = numeroBR(t.value);
+    t.value = n === null ? '' : moeda(n);
+    cur.av[t.dataset.a] = t.value; salvar();
+    const el = $('#valor-m2'); if (el) el.textContent = textoValorM2(cur);
+    return;
+  }
   if (t.dataset.pm) {
     const [cat, i] = t.dataset.pm.split('.');
     cur.partes[cat][+i].mesmoEndereco = t.checked;
@@ -1230,7 +1440,7 @@ app.addEventListener('click', async e => {
 });
 
 // ---------- PDF: salvar, visualizar, compartilhar ----------
-const nomePDF = v => `Vistoria-${v.tipo === 'entrega' ? 'entrega' : 'previa'}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
+const nomePDF = v => `${ehAvaliacao(v) ? 'Avaliacao' : 'Vistoria-' + (v.tipo === 'entrega' ? 'entrega' : 'previa')}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
 async function montarPDF() {
   await flush();
   try { return gerarPDF(cur, await cfgGet()); }
@@ -1436,11 +1646,57 @@ function gerarPDF(v, cfg) {
 
   // Capa / identificação
   font(15, 'bold');
-  doc.text(v.tipo === 'entrega' ? 'LAUDO DE VISTORIA DE ENTREGA DE CHAVES' : 'LAUDO DE VISTORIA PRÉVIA (ENTRADA)', W / 2, y + 6, { align: 'center' });
+  doc.text({ previa: 'LAUDO DE VISTORIA PRÉVIA (ENTRADA)', entrega: 'LAUDO DE VISTORIA DE ENTREGA DE CHAVES', avaliacao: 'LAUDO DE AVALIAÇÃO DE IMÓVEL' }[v.tipo], W / 2, y + 6, { align: 'center' });
   y += 11;
-  font(10); doc.setTextColor(90); doc.text(`Data da vistoria: ${fmtData(v.data)}`, W / 2, y + 3, { align: 'center' }); doc.setTextColor(0);
+  font(10); doc.setTextColor(90); doc.text(`Data da vistoria: ${fmtData(v.data)}`, W / 2, y + 3, { align: 'center' });
+  if (ehJudicial(v) && v.av.processo) { y += 5; doc.text(`Processo nº ${v.av.processo}`, W / 2, y + 3, { align: 'center' }); }
+  doc.setTextColor(0);
   y += 10;
 
+  if (ehAvaliacao(v)) {
+    const av = v.av;
+    secao(`${n++}. IDENTIFICAÇÃO DO LAUDO`);
+    campo('Finalidade:', FINALIDADES[av.finalidade]);
+    if (ehJudicial(v)) {
+      campo('Processo nº:', av.processo);
+      campo('Juízo/Vara:', av.vara);
+      campo('Comarca:', av.comarca);
+      y += 2; partesDe('ativo'); partesDe('passivo');
+    } else {
+      y += 2; partesDe('solicitantes'); partesDe('proprietarios');
+    }
+    y += 2;
+    campo('Referência:', v.contrato);
+    campo('Avaliador(a):', [v.vistoriador, av.registroAvaliador].filter(Boolean).join(' - '));
+    campo('Data da vistoria:', fmtData(v.data));
+    campo('Acompanhamento:', av.acompanhante);
+    y += 3;
+
+    secao(`${n++}. IDENTIFICAÇÃO E CARACTERIZAÇÃO DO IMÓVEL`);
+    campo('Endereço:', (v.rua || '') + (v.numero ? ', nº ' + v.numero : ''));
+    campo('Complemento:', v.complemento);
+    campo('Bairro:', v.bairro);
+    campo('Cidade/UF:', cidadeUF(v));
+    campo('Matrícula:', [av.matricula && 'nº ' + av.matricula, av.cartorio].filter(Boolean).join(' - '));
+    campo('Inscrição municipal:', av.inscricao);
+    y += 2;
+    const m2 = s => s ? `${s} m²` : '';
+    campo('Tipo de imóvel:', av.tipoImovel);
+    campo('Uso:', av.uso);
+    campo('Área privativa/útil:', m2(av.areaPrivativa));
+    campo('Área total/construída:', m2(av.areaTotal));
+    campo('Área do terreno:', m2(av.areaTerreno));
+    campo('Pavimentos:', av.pavimentos);
+    campo('Andar:', av.andar);
+    campo('Compartimentos:', [av.quartos && `${av.quartos} quarto(s)`, av.suites && `${av.suites} suíte(s)`,
+      av.banheiros && `${av.banheiros} banheiro(s)`, av.vagas && `${av.vagas} vaga(s) de garagem`].filter(Boolean).join(', '));
+    campo('Idade aproximada:', av.idade ? `${av.idade} anos` : '');
+    campo('Padrão de acabamento:', av.padrao);
+    campo('Estado de conservação:', av.conservacao);
+    campo('Ocupação:', av.ocupacao);
+    if (av.entorno.trim()) { y += 2; para('Entorno e infraestrutura:', 10, 'bold'); texto(av.entorno); }
+    y += 3;
+  } else {
   secao(`${n++}. IDENTIFICAÇÃO`);
   campo('Endereço:', (v.rua || v.endereco || '') + (v.numero ? ', nº ' + v.numero : ''));
   campo('Complemento:', v.complemento);
@@ -1465,6 +1721,7 @@ function gerarPDF(v, cfg) {
     campo('Medidor de gás:', v.gas);
     y += 3;
   }
+  } // fim da identificação da vistoria de locação
   if (v.obs) { secao(`${n++}. OBSERVAÇÕES GERAIS`); texto(v.obs); y += 3; }
 
   const nComodos = n++;
@@ -1503,9 +1760,31 @@ function gerarPDF(v, cfg) {
     }
   });
 
+  // Valores estimados (laudo de avaliação)
+  if (ehAvaliacao(v)) {
+    novaPag();
+    secao(`${n++}. VALORES ESTIMADOS`);
+    const m = valorM2(v);
+    let algum = false;
+    for (const [k, rotulo, unit] of [['valorVenda', 'Valor de mercado para venda', m.venda], ['valorLocacao', 'Valor de locação mensal', m.locacao]]) {
+      const val = numeroBR(v.av[k]);
+      if (val === null) continue;
+      algum = true;
+      ensure(30);
+      para(rotulo + ':', 10, 'bold');
+      font(16, 'bold'); doc.text(`R$ ${moeda(val)}`, M, y + 6); y += 9;
+      para(`(${reaisPorExtenso(val)})`, 10, 'italic');
+      if (unit) para(`Valor unitário: ${unit}`, 9.5);
+      y += 5;
+    }
+    if (!algum) para('Nenhum valor informado.', 10, 'italic');
+    if (v.av.metodologia.trim()) { y += 2; para('Metodologia e fundamentação:', 10, 'bold'); texto(v.av.metodologia); }
+    y += 8;
+  }
+
   // Declaração e assinaturas
-  novaPag();
-  secao(`${n++}. DECLARAÇÃO E ASSINATURAS`);
+  if (ehAvaliacao(v)) ensure(90); else novaPag();
+  secao(`${n++}. ${ehAvaliacao(v) ? 'DECLARAÇÃO E ASSINATURA' : 'DECLARAÇÃO E ASSINATURAS'}`);
   texto(textoDeclaracao(v));
   y += 6;
   // local da assinatura = cidade/UF do imóvel vistoriado; sem cidade, deixa espaço para preencher à mão
@@ -1523,20 +1802,25 @@ function gerarPDF(v, cfg) {
     font(9); doc.text(papel + (docu ? ` - CPF/CNPJ: ${docu}` : ''), W / 2, y + 9.5, { align: 'center' });
     y += 32;
   };
-  // uma linha para cada locatário, locador e fiador (fiador em branco não gera linha)
-  for (const cat of ['locatarios', 'locadores', 'fiadores']) {
-    v.partes[cat].forEach(p => {
-      if (cat === 'fiadores' && !p.nome && !p.doc) return;
-      assinatura(p.nome, CATEGORIAS[cat].assina, p.doc);
-    });
+  if (ehAvaliacao(v)) {
+    // no laudo de avaliação, só o avaliador assina
+    assinatura(v.vistoriador, 'AVALIADOR(A)' + (v.av.registroAvaliador ? ` - ${v.av.registroAvaliador}` : ''));
+  } else {
+    // uma linha para cada locatário, locador e fiador (fiador em branco não gera linha)
+    for (const cat of ['locatarios', 'locadores', 'fiadores']) {
+      v.partes[cat].forEach(p => {
+        if (cat === 'fiadores' && !p.nome && !p.doc) return;
+        assinatura(p.nome, CATEGORIAS[cat].assina, p.doc);
+      });
+    }
+    assinatura(v.vistoriador, 'VISTORIADOR(A)');
   }
-  assinatura(v.vistoriador, 'VISTORIADOR(A)');
 
   // Cabeçalho, rodapé e rubrica em todas as páginas
   const total = doc.getNumberOfPages();
   font(8);
   const slh = 6, slw = logo ? Math.min(30, slh * logo.w / logo.h) : 0; // logo pequeno no cabeçalho (páginas 2+)
-  let cab = `${v.tipo === 'entrega' ? 'Vistoria de entrega de chaves' : 'Vistoria prévia'} - ${enderecoCompleto(v)}`;
+  let cab = `${{ previa: 'Vistoria prévia', entrega: 'Vistoria de entrega de chaves', avaliacao: 'Laudo de avaliação' }[v.tipo]} - ${enderecoCompleto(v)}`;
   while (doc.getTextWidth(cab) > CW - 25 - slw && cab.length > 10) cab = cab.slice(0, -4) + '...';
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
@@ -1547,7 +1831,7 @@ function gerarPDF(v, cfg) {
     doc.text(fmtData(v.data), W - M - (comLogo ? slw + 3 : 0), 10, { align: 'right' });
     doc.line(M, 12, W - M, 12);
     doc.line(M, H - 13, W - M, H - 13);
-    doc.text('Rubricas: ______________________________', M, H - 8);
+    doc.text(ehAvaliacao(v) ? 'Rubrica do(a) avaliador(a): ____________________' : 'Rubricas: ______________________________', M, H - 8);
     doc.text(`Página ${p} de ${total}`, W - M, H - 8, { align: 'right' });
     doc.setTextColor(0);
   }

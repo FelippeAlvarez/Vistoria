@@ -21,6 +21,7 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 ## O que o aplicativo faz
 
 - **Tela inicial** com acesso direto a: nova vistoria prévia, nova vistoria de entrega, minhas vistorias, laudos de outras pessoas, cadastro do responsável e configurações.
+- **Laudo de avaliação de imóvel** (judicial ou extrajudicial): processo, juízo/vara, comarca e partes dos polos ativo e passivo (ou solicitantes e proprietários); caracterização do imóvel (tipo, uso, áreas, pavimentos, compartimentos, idade, padrão, conservação, matrícula, ocupação, entorno); valores de venda e/ou locação estimados pelo avaliador, com valor por extenso e valor por m²; metodologia; assinatura do avaliador. Fotos e descrição por cômodo como nas vistorias.
 - **Dois tipos de vistoria:** prévia (entrada) e entrega de chaves. A partir de uma vistoria prévia, é possível criar a de entrega com os mesmos dados e cômodos.
 - **Dados do imóvel e das partes:** endereço do imóvel (rua, número, complemento, bairro, cidade e UF); **um ou mais locadores e locatários e, se houver, fiadores**, cada um com CPF/CNPJ e endereço (com opção de repetir o endereço do primeiro da mesma categoria); vistoriador, contrato, chaves e leituras de água, energia e gás. Todas as partes ganham linha de assinatura no laudo.
 - **Um cômodo por aba**, com estado geral, descrição e fotos com legenda (tiradas na hora pela câmera ou escolhidas da galeria). Cômodos repetidos são numerados automaticamente (Quarto 01, Quarto 02…).
