@@ -33,6 +33,17 @@ a.btn{text-decoration:none}
 .tile small{color:var(--muted);font-size:13px}
 .tile.primary{background:var(--pri);border-color:var(--pri);color:#fff}
 .tile.primary small{color:rgba(255,255,255,.85)}
+/* tutorial: primeiro botão do menu, ocupando a linha inteira */
+.tile.tutorial{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center;background:var(--chip);border-color:var(--pri)}
+.tile.tutorial .ico{grid-row:span 2;font-size:30px}
+/* tutorial */
+.tutorial-txt{line-height:1.6;scroll-margin-top:64px}
+.tutorial-txt h2{font-size:17px}
+.tutorial-txt h3{border-top:0;padding-top:0;margin:18px 0 6px;font-size:15px}
+.tutorial-txt li{margin-bottom:4px}
+.tutorial-txt ol,.tutorial-txt ul{padding-left:22px}
+.indice{display:flex;flex-wrap:wrap;gap:6px}
+.link-tutorial{font-size:13px;margin:-8px 0 12px;text-align:right}
 /* barra de ações da vistoria */
 .acoes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
 .acoes .btn{justify-content:center}
@@ -84,6 +95,7 @@ textarea{resize:vertical}
 figure{margin:0;position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
 figure img{width:100%;height:140px;object-fit:cover;display:block}
 figure input{border:0;border-top:1px solid var(--line);border-radius:0;font-size:13px}
+.foto-data{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:2px 6px;border-radius:6px}
 figure .legenda{display:flex;align-items:stretch;border-top:1px solid var(--line)}
 figure .legenda input{border-top:0;min-width:0}
 /* partes (locadores, locatários, fiadores) */
@@ -191,8 +203,77 @@ const fmtData = s => s ? s.split('-').reverse().join('/') : '';
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const extenso = s => { if (!s) return ''; const [a, m, d] = s.split('-'); return `${+d} de ${MESES[m - 1]} de ${a}`; };
 const slug = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-const TIPOS = { previa: 'Vistoria prévia (entrada)', entrega: 'Vistoria de entrega de chaves', avaliacao: 'Laudo de avaliação de imóvel' };
+const TIPOS = { previa: 'Vistoria prévia (entrada)', entrega: 'Vistoria de entrega de chaves', ressalvas: 'Vistoria de ressalvas do locatário', avaliacao: 'Laudo de avaliação de imóvel' };
 const ehAvaliacao = v => v.tipo === 'avaliacao';
+const ehRessalvas = v => v.tipo === 'ressalvas';
+// títulos usados no PDF e no cabeçalho das páginas
+const TITULO_PDF = { previa: 'LAUDO DE VISTORIA PRÉVIA (ENTRADA)', entrega: 'LAUDO DE VISTORIA DE ENTREGA DE CHAVES',
+  ressalvas: 'VISTORIA DE RESSALVAS DO LOCATÁRIO', avaliacao: 'LAUDO DE AVALIAÇÃO DE IMÓVEL' };
+const TITULO_CURTO = { previa: 'Vistoria prévia', entrega: 'Vistoria de entrega de chaves', ressalvas: 'Vistoria de ressalvas do locatário', avaliacao: 'Laudo de avaliação' };
+
+// ---------- Vistoria de ressalvas do locatário ----------
+// referência ao laudo do locador que está sendo ressalvado (feito ou não neste aplicativo)
+const CAMPOS_RS = ['dataOriginal', 'responsavelOriginal', 'dataRecebimento', 'prazoDias'];
+const novoRs = () => ({ dataOriginal: '', responsavelOriginal: '', dataRecebimento: '', prazoDias: '10' });
+// declaração no singular ou no plural, conforme o número de locatários
+function declaracaoRessalvas(v) {
+  const data = fmtData(v.rs.dataRecebimento) || '____/____/________';
+  return v.partes.locatarios.length > 1
+    ? `Os locatários declaram ter recebido o laudo em ${data} e apresentam, no prazo, as divergências abaixo, requerendo que integrem o laudo de vistoria.`
+    : `O locatário declara ter recebido o laudo em ${data} e apresenta, no prazo, as divergências abaixo, requerendo que integrem o laudo de vistoria.`;
+}
+// data-limite = recebimento + prazo (meramente informativa)
+function prazoRessalvas(v) {
+  const dias = parseInt(v.rs.prazoDias, 10);
+  if (!v.rs.dataRecebimento || !(dias >= 0)) return null;
+  const [a, m, d] = v.rs.dataRecebimento.split('-').map(Number);
+  const limite = new Date(a, m - 1, d + dias);
+  const hojeD = new Date(); hojeD.setHours(0, 0, 0, 0);
+  return { limite, restam: Math.round((limite - hojeD) / 86400000) };
+}
+function textoPrazo(v) {
+  const p = prazoRessalvas(v);
+  if (!p) return 'Informe a data de recebimento do laudo e o prazo do contrato para ver a data-limite.';
+  const lim = p.limite.toLocaleDateString('pt-BR');
+  if (p.restam > 1) return `📅 Data-limite para apresentar as ressalvas: ${lim} (faltam ${p.restam} dias).`;
+  if (p.restam === 1) return `📅 Data-limite: ${lim} (amanhã).`;
+  if (p.restam === 0) return `⚠️ Data-limite: ${lim} (hoje).`;
+  return `⚠️ O prazo terminou em ${lim}. Verifique o contrato antes de apresentar as ressalvas.`;
+}
+
+// ---------- Data e hora das fotos ----------
+// Lê a data de captura gravada pela câmera (EXIF) antes de a foto ser comprimida;
+// sem EXIF, usa a data do arquivo.
+async function dataDaFoto(file) {
+  try {
+    const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (buf.getUint16(0) === 0xFFD8) {
+      for (let o = 2; o + 10 < buf.byteLength;) {
+        const marca = buf.getUint16(o), tam = buf.getUint16(o + 2);
+        if ((marca & 0xFF00) !== 0xFF00) break;
+        if (marca === 0xFFE1 && buf.getUint32(o + 4) === 0x45786966) { // "Exif"
+          const t = o + 10, le = buf.getUint16(t) === 0x4949;
+          const u16 = p => buf.getUint16(t + p, le), u32 = p => buf.getUint32(t + p, le);
+          const procurar = (ifd, tag) => { const n = u16(ifd); for (let i = 0; i < n; i++) { const e = ifd + 2 + i * 12; if (u16(e) === tag) return e; } return -1; };
+          const ifd0 = u32(4), exif = procurar(ifd0, 0x8769);
+          let e = exif >= 0 ? procurar(u32(exif + 8), 0x9003) : -1; // data original da captura
+          if (e < 0) e = procurar(ifd0, 0x0132);                    // data de alteração
+          if (e >= 0) {
+            const ini = t + u32(e + 8);
+            let txt = ''; for (let i = 0; i < 19; i++) txt += String.fromCharCode(buf.getUint8(ini + i));
+            const m = /^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)$/.exec(txt);
+            if (m && m[1] !== '0000') return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`;
+          }
+          break;
+        }
+        o += 2 + tam;
+      }
+    }
+  } catch { /* sem EXIF legível */ }
+  return file.lastModified ? new Date(file.lastModified).toISOString() : '';
+}
+const DATA_FOTO_OK = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?Z?$/;
+const fmtDataHora = s => s ? new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const ESTADOS = ['', 'Novo', 'Bom', 'Regular', 'Ruim'];
 const PRESETS = ['Sala', 'Cozinha', 'Quarto', 'Suíte', 'Banheiro', 'Lavabo', 'Área de serviço', 'Varanda', 'Garagem', 'Fachada / Área externa'];
 const DECLARACAO = {
@@ -303,11 +384,13 @@ function migrar(v) {
   // até a versão 1.4 não havia as partes e os campos do laudo de avaliação
   for (const [k, c] of Object.entries(CATEGORIAS)) if (!Array.isArray(v.partes[k])) v.partes[k] = c.opcional ? [] : [novaParte()];
   v.av = Object.assign(novaAv(), v.av || {});
+  v.rs = Object.assign(novoRs(), v.rs || {});
   return v;
 }
 const semLocatario = v => v.tipo === 'previa' && v.acompanhou === 'nao';
 const temFiador = v => !!(v.partes && v.partes.fiadores.length);
-const declaracaoPadrao = v => ehAvaliacao(v)
+const declaracaoPadrao = v => ehRessalvas(v) ? declaracaoRessalvas(v)
+  : ehAvaliacao(v)
   ? DECLARACAO.avaliacao + (ehJudicial(v) ? DECLARACAO.avaliacaoJudicial : '')
   : (semLocatario(v) ? DECLARACAO.previaSemLocatario : DECLARACAO[v.tipo]) +
     (temFiador(v) ? ' O(A)(S) FIADOR(A)(ES) declara(m) ter ciência do inteiro teor do presente laudo.' : '');
@@ -326,7 +409,7 @@ function baixar(blob, nome) {
 let cur = null, tab = 0, saveT = null;
 function novaVistoria(tipo) {
   return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '',
-    partes: partesIniciais(), av: novaAv(), vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
+    partes: partesIniciais(), av: novaAv(), rs: novoRs(), fotoDataHora: false, vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
     comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
 }
 // "base" = tipo do cômodo (Quarto, Banheiro…), usado na numeração automática.
@@ -462,6 +545,12 @@ function sanitizar(o) {
   v.uf = limparUF(v.uf);
   v.partes = sanitizarPartes(o);
   v.av = sanitizarAv(o);
+  const rs = o.rs && typeof o.rs === 'object' ? o.rs : {};
+  v.rs = novoRs();
+  for (const k of ['dataOriginal', 'dataRecebimento']) v.rs[k] = /^\d{4}-\d{2}-\d{2}$/.test(rs[k]) ? rs[k] : '';
+  v.rs.responsavelOriginal = TXT(rs.responsavelOriginal, 300);
+  v.rs.prazoDias = /^\d{1,3}$/.test(String(rs.prazoDias)) ? String(rs.prazoDias) : '10';
+  v.fotoDataHora = o.fotoDataHora === true;
   v.data = /^\d{4}-\d{2}-\d{2}$/.test(o.data) ? o.data : '';
   v.acompanhou = o.acompanhou === 'nao' ? 'nao' : 'sim';
   if (typeof o.id === 'string' && /^[a-z0-9]{4,40}$/i.test(o.id)) v.id = o.id;
@@ -475,7 +564,8 @@ function sanitizar(o) {
     descricao: TXT(c.descricao),
     fotos: (Array.isArray(c.fotos) ? c.fotos : [])
       .filter(f => f && typeof f.data === 'string' && IMG_OK.test(f.data)).slice(0, 500)
-      .map(f => ({ id: uid(), legenda: TXT(f.legenda, 500), data: f.data, w: Math.max(1, +f.w || 1), h: Math.max(1, +f.h || 1) }))
+      .map(f => ({ id: uid(), legenda: TXT(f.legenda, 500), data: f.data, w: Math.max(1, +f.w || 1), h: Math.max(1, +f.h || 1),
+        em: typeof f.em === 'string' && DATA_FOTO_OK.test(f.em) ? f.em : '' }))
   }));
   return v;
 }
@@ -643,7 +733,8 @@ function topo(titulo, voltarPara) {
 // vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
 const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim()) &&
   !Object.values(v.partes || {}).flat().some(p => CAMPOS_PARTE.some(k => String(p[k] || '').trim())) &&
-  !CAMPOS_AV.some(k => k !== 'finalidade' && String((v.av || {})[k] || '').trim());
+  !CAMPOS_AV.some(k => k !== 'finalidade' && String((v.av || {})[k] || '').trim()) &&
+  !['dataOriginal', 'responsavelOriginal', 'dataRecebimento'].some(k => String((v.rs || {})[k] || '').trim());
 async function rotear() {
   cancelarDitado();
   const anterior = cur;
@@ -662,13 +753,14 @@ async function rotear() {
   }
   cur = null;
   scrollTo(0, 0);
+  if (nome === 'tutorial') return telaTutorial(id); // #/tutorial/<seção>
   const telas = { vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig, termos: telaTermos };
   (telas[nome] || telaInicio)();
 }
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.5';
+const VERSAO_APP = '1.6';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -677,8 +769,10 @@ async function telaInicio() {
   app.innerHTML = `
   <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
   <div class="menu">
+    <a class="tile tutorial" href="#/tutorial"><span class="ico">📘</span><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></a>
     <button class="tile primary" data-act="nova" data-tipo="previa"><span class="ico">🏠</span><strong>Nova vistoria prévia</strong><small>Entrada do locatário</small></button>
     <button class="tile primary" data-act="nova" data-tipo="entrega"><span class="ico">🔑</span><strong>Nova vistoria de entrega</strong><small>Devolução das chaves</small></button>
+    <button class="tile primary" data-act="nova" data-tipo="ressalvas"><span class="ico">✍️</span><strong>Nova vistoria de ressalvas</strong><small>Divergências do locatário sobre o laudo recebido</small></button>
     <button class="tile primary" data-act="nova" data-tipo="avaliacao"><span class="ico">💰</span><strong>Nova avaliação de imóvel</strong><small>Laudo com valor de venda e/ou locação</small></button>
     <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
     <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
@@ -697,8 +791,8 @@ async function telaInicio() {
 
 // TERMOS_VERSAO identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
 // (a 1ª versão, de 30/09/2026, foi registrada com a versão "30/09/2026")
-const TERMOS_VERSAO = '13/10/2026';
-const TERMOS_DATA = '13/10/2026 (inclusão do laudo de avaliação)';
+const TERMOS_VERSAO = '16/10/2026';
+const TERMOS_DATA = '16/10/2026 (inclusão da vistoria de ressalvas do locatário)';
 const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_VERSAO; };
 async function telaTermos(exigirAceite = false) {
   topo('Termos de Uso', exigirAceite ? null : 'inicio');
@@ -711,7 +805,7 @@ async function telaTermos(exigirAceite = false) {
     <p class="destaque">Ao utilizar o aplicativo <strong>Vistoria de Imóveis</strong>, você declara ter lido, compreendido e aceitado integralmente estes Termos. Se não concordar com qualquer disposição, não utilize o aplicativo.</p>
 
     <h3>1. Objeto</h3>
-    <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação e de laudos de avaliação de imóveis, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>
+    <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação (inclusive de ressalvas do locatário) e de laudos de avaliação de imóveis, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>
 
     <h3>2. Armazenamento dos dados</h3>
     <p>As vistorias, fotografias, dados pessoais e demais informações inseridas no aplicativo são armazenados <strong>exclusivamente no dispositivo do usuário</strong> (e, quando o próprio usuário assim escolher, em pastas ou serviços de terceiros por ele indicados). O desenvolvedor <strong>não recebe, não armazena, não acessa e não tem meios de recuperar</strong> essas informações.</p>
@@ -731,6 +825,8 @@ async function telaTermos(exigirAceite = false) {
 
     <h3>4. Conteúdo dos laudos</h3>
     <p>O usuário é integralmente responsável pela veracidade, exatidão e completude das informações, descrições e fotografias inseridas, bem como pela revisão do laudo antes de sua assinatura e utilização. Os textos padrão oferecidos pelo aplicativo (inclusive declarações e prazos) são <strong>meros modelos</strong>, não constituem aconselhamento jurídico e devem ser ajustados pelo usuário à legislação aplicável, ao contrato de locação e às circunstâncias de cada caso.</p>
+    <p>Na <strong>vistoria de ressalvas do locatário</strong>, a observância dos prazos contratuais e legais, a forma e a comprovação da entrega do documento ao locador e o seu conteúdo são de exclusiva responsabilidade do usuário. A data-limite exibida pelo aplicativo é calculada apenas a partir das informações digitadas pelo usuário, tem caráter <strong>meramente informativo</strong> e não substitui a leitura do contrato.</p>
+    <p>Quando o usuário opta por imprimir a <strong>data e a hora das fotos</strong>, elas são obtidas dos dados gravados pela câmera ou, na falta destes, da data do arquivo no aparelho, e podem não corresponder ao momento real da captura (por exemplo, se o relógio do aparelho estiver incorreto ou a foto tiver sido editada ou copiada).</p>
     <p>Nos <strong>laudos de avaliação</strong>, os valores indicados, a metodologia, as premissas e as conclusões são <strong>estimativas de exclusiva responsabilidade do avaliador</strong>. O aplicativo limita-se a registrar as informações inseridas e a efetuar operações aritméticas simples (como o valor por metro quadrado e o valor por extenso); não realiza pesquisa ou estimativa de valor de mercado, não verifica a habilitação profissional do avaliador nem a observância de normas técnicas (como a ABNT NBR 14653) ou de exigências legais e processuais, e não substitui o trabalho técnico de profissional habilitado.</p>
 
     <h3>5. Falhas, perda de dados e disponibilidade</h3>
@@ -771,6 +867,93 @@ async function telaTermos(exigirAceite = false) {
   <p style="text-align:center"><a class="btn" href="#/inicio">← Voltar à tela inicial</a></p>`}`;
 }
 
+// ---------- Tutorial ----------
+const SECOES_TUTORIAL = [
+  ['inicio', 'Antes de começar'], ['app', 'Passo a passo no aplicativo'], ['praticas', 'Boas práticas'],
+  ['previa', 'Vistoria prévia'], ['entrega', 'Vistoria de entrega'], ['ressalvas', 'Ressalvas do locatário'],
+  ['avaliacao', 'Avaliação'], ['lgpd', 'Dados pessoais']
+];
+function telaTutorial(secao) {
+  topo('Como fazer uma vistoria', 'inicio');
+  const s = (id, titulo, corpo) => `<section class="card tutorial-txt" id="tut-${id}"><h2>${titulo}</h2>${corpo}</section>`;
+  app.innerHTML = `
+  <section class="card">
+    <h2>📘 Como fazer uma vistoria</h2>
+    <p class="muted" style="margin-top:0">Toque num tema para ir direto a ele.</p>
+    <div class="indice">${SECOES_TUTORIAL.map(([id, t]) => `<a class="chip" href="#/tutorial/${id}">${t}</a>`).join('')}</div>
+  </section>
+
+  ${s('inicio', '1. Antes de começar', `<ul>
+    <li><strong>Cadastro do responsável:</strong> na tela inicial, preencha nome, contato e logo. Eles aparecem no topo de todos os PDFs.</li>
+    <li><strong>Instale o aplicativo</strong> no celular: ele abre mais rápido e funciona sem internet (o ditado por voz é a exceção: precisa de internet).</li>
+    <li>Vá com a <strong>bateria carregada</strong> e, se possível, durante o dia: luz natural melhora muito as fotos.</li>
+    <li>Combine com as partes quem vai acompanhar a vistoria. A presença do locatário reduz discussões futuras.</li>
+    <li>Leve o contrato e, na entrega das chaves ou nas ressalvas, o laudo de entrada, para comparar.</li>
+  </ul>`)}
+
+  ${s('app', '2. Passo a passo no aplicativo', `<ol>
+    <li>Na tela inicial, escolha o tipo: <strong>vistoria prévia</strong>, <strong>de entrega</strong>, <strong>ressalvas do locatário</strong> ou <strong>avaliação</strong>.</li>
+    <li>Preencha os dados do imóvel e das partes. Use <strong>+ Adicionar</strong> para incluir mais de um locador, locatário ou fiador, e “Mesmo endereço do(a) … 1” para não repetir endereços.</li>
+    <li>Em <strong>Cômodos</strong>, toque em <strong>+ Cômodo</strong> e escolha o tipo. Cômodos repetidos são numerados sozinhos (Quarto 01, Quarto 02…).</li>
+    <li>Em cada cômodo, informe o estado geral, escreva a descrição (ou use <strong>🎤 Ditar</strong>) e tire as fotos com <strong>📷 Tirar foto</strong>. Dê uma legenda a cada foto.</li>
+    <li>Se quiser, marque <strong>“Imprimir no PDF a data e a hora de cada foto”</strong>: isso reforça o valor de prova das fotos.</li>
+    <li>Revise tudo em <strong>👁️ Visualizar</strong>. Depois use <strong>⬇️ Salvar PDF</strong> ou <strong>📤 Compartilhar PDF</strong>.</li>
+    <li>Imprima ou envie o PDF para assinatura. As partes assinam ao final e rubricam todas as páginas.</li>
+    <li>Para outra pessoa continuar o trabalho, use <strong>📨 Enviar p/ edição</strong>. Faça também o <strong>Backup de todas</strong> com frequência: as vistorias ficam só neste aparelho.</li>
+  </ol>`)}
+
+  ${s('praticas', '3. Boas práticas de vistoria', `<ul>
+    <li><strong>Siga sempre a mesma ordem</strong>: da entrada para os fundos, e em cada cômodo do teto para o piso, no sentido horário. Assim nada fica para trás.</li>
+    <li>Em cada cômodo, tire <strong>uma foto geral</strong> e depois <strong>fotos de detalhe</strong> de tudo o que tiver marca, defeito ou desgaste.</li>
+    <li><strong>Descreva material e estado</strong>: piso (tipo e conservação), paredes e teto (pintura, manchas, fissuras), portas, janelas, fechaduras, vidros, armários, louças e metais.</li>
+    <li><strong>Teste</strong> tomadas e interruptores, torneiras, descargas, chuveiro e ralos, e anote o que não funcionar.</li>
+    <li>Procure sinais de <strong>umidade e infiltração</strong> (manchas, mofo, bolhas na pintura), principalmente em banheiros, cozinha e paredes externas.</li>
+    <li>Registre as <strong>leituras dos medidores</strong> (água, energia e gás) e a <strong>quantidade de chaves</strong> entregues.</li>
+    <li>Liste <strong>móveis, eletrodomésticos e equipamentos</strong> que fazem parte da locação, com o estado de cada um.</li>
+    <li><strong>Evite termos vagos</strong> como “bom estado” sem detalhar. Prefira: “pintura branca sem manchas; pequena fissura de 10 cm acima da porta”.</li>
+    <li>Se algo não pôde ser verificado (cômodo trancado, falta de luz), escreva isso no laudo.</li>
+  </ul>`)}
+
+  ${s('previa', '4. Vistoria prévia (entrada)', `<ul>
+    <li>É a <strong>referência para o fim do contrato</strong>: na devolução, o imóvel será comparado com o que estiver aqui. Quanto mais detalhada, melhor para as duas partes.</li>
+    <li>Indique se o locatário <strong>acompanhou</strong> a vistoria. Se não acompanhou, o laudo informa o prazo para ele apresentar discordâncias e traz o campo de recebimento.</li>
+    <li>Entregue uma via ao locatário e guarde o comprovante de entrega.</li>
+  </ul>`)}
+
+  ${s('entrega', '5. Vistoria de entrega das chaves', `<ul>
+    <li>Use <strong>Criar entrega</strong>, em “Minhas vistorias”, a partir da vistoria prévia: imóvel, partes e cômodos já vêm preenchidos.</li>
+    <li><strong>Compare cômodo a cômodo</strong> com a vistoria de entrada e registre as diferenças, separando o desgaste natural do uso das avarias.</li>
+    <li>Fotografe do mesmo ângulo das fotos de entrada, quando possível: facilita a comparação.</li>
+    <li>Anote as leituras finais dos medidores e as chaves devolvidas.</li>
+  </ul>`)}
+
+  ${s('ressalvas', '6. Vistoria de ressalvas do locatário', `<ul>
+    <li>Serve para o <strong>locatário registrar as divergências</strong> que encontrar no laudo de vistoria que recebeu do locador, feito ou não por este aplicativo.</li>
+    <li>Informe a <strong>data em que recebeu o laudo</strong> e o <strong>prazo do contrato</strong>: o aplicativo mostra a data-limite. Atenção: esse cálculo é só um apoio; confira sempre o contrato.</li>
+    <li>Inclua <strong>apenas os cômodos com divergência</strong> e descreva, em cada um, o que está diferente do laudo do locador, com fotos.</li>
+    <li>Se o laudo do locador foi feito neste aplicativo e você o recebeu como arquivo, use <strong>Criar ressalvas</strong> em “Minhas vistorias”: imóvel, partes e cômodos já vêm preenchidos.</li>
+    <li>Entregue o documento ao locador dentro do prazo e peça que ele assine o campo <strong>“Recebido por”</strong>, ou envie por um meio que comprove o recebimento.</li>
+  </ul>`)}
+
+  ${s('avaliacao', '7. Laudo de avaliação', `<ul>
+    <li>Escolha a finalidade: <strong>judicial</strong> (processo, juízo, comarca e partes) ou <strong>extrajudicial</strong> (solicitantes e proprietários).</li>
+    <li>Caracterize o imóvel com cuidado: áreas, compartimentos, idade, padrão, conservação, ocupação e entorno.</li>
+    <li>Os valores são <strong>estimativa do avaliador</strong>: descreva a metodologia e os elementos de comparação utilizados. O aplicativo calcula apenas o valor por m² e o valor por extenso.</li>
+  </ul>`)}
+
+  ${s('lgpd', '8. Cuidados com dados pessoais (LGPD)', `<ul>
+    <li>Registre só os dados necessários. Evite fotografar pessoas, documentos e objetos pessoais.</li>
+    <li>Proteja o aparelho com senha e bloqueio de tela.</li>
+    <li>Envie laudos e arquivos apenas a quem deve recebê-los, e apague-os quando não forem mais necessários.</li>
+    <li>O ditado por voz envia a fala ao serviço do navegador (Google, Apple ou Microsoft). Use-o se estiver de acordo.</li>
+  </ul>
+  <p class="muted">Leia também os <a href="#/termos">Termos de Uso</a>.</p>`)}
+
+  <p style="text-align:center"><a class="btn" href="#/inicio">← Voltar à tela inicial</a></p>`;
+  const alvo = secao && document.getElementById('tut-' + secao);
+  if (alvo) setTimeout(() => alvo.scrollIntoView({ block: 'start' }), 0);
+}
+
 async function telaVistorias() {
   topo('Minhas vistorias e avaliações', 'inicio');
   const todas = (await dbAll()).map(migrar).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
@@ -786,6 +969,7 @@ async function telaVistorias() {
     <div class="row">
       <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia</button>
       <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega</button>
+      <button class="btn primary" data-act="nova" data-tipo="ressalvas">+ Ressalvas do locatário</button>
       <button class="btn primary" data-act="nova" data-tipo="avaliacao">+ Avaliação</button>
     </div>
     ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias num único arquivo">💾 Backup de todas</button>' : ''}
@@ -800,7 +984,8 @@ async function telaVistorias() {
           ${v.origem ? `<small>📥 Recebida${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</small>` : ''}</div>
         <div class="row">
           <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
-          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>` : ''}
+          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>
+          <button class="btn" data-act="derivarressalvas" data-id="${v.id}" title="Cria a vistoria de ressalvas do locatário a partir deste laudo">Criar ressalvas</button>` : ''}
           <button class="btn" data-act="enviar" data-id="${v.id}" title="Envia o laudo para outra pessoa continuar a edição">📨 Enviar p/ edição</button>
           <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
         </div>
@@ -929,7 +1114,7 @@ function inp(f, label, type = 'text', cls = '', attrs = '') {
 function telaEditor() {
   cancelarDitado();
   const sy = scrollY, v = cur;
-  topo(ehAvaliacao(v) ? 'Laudo de avaliação' : v.tipo === 'entrega' ? 'Vistoria de entrega' : 'Vistoria prévia', 'vistorias');
+  topo({ previa: 'Vistoria prévia', entrega: 'Vistoria de entrega', ressalvas: 'Ressalvas do locatário', avaliacao: 'Laudo de avaliação' }[v.tipo], 'vistorias');
   app.innerHTML = `
   <div class="acoes">
     <button class="btn" data-act="previa">👁️ Visualizar</button>
@@ -939,6 +1124,7 @@ function telaEditor() {
   </div>
   ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
   <section class="card">
+    <p class="link-tutorial"><a href="#/tutorial/${v.tipo}">📘 Dúvidas? Veja o tutorial</a></p>
     <h2>${ehAvaliacao(v) ? 'Dados do laudo' : 'Dados da vistoria'}</h2>
     <div class="grid">
       <label>Tipo<select data-f="tipo">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === v.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -950,9 +1136,11 @@ function telaEditor() {
       ${ehAvaliacao(v) ? selAv('finalidade', 'Finalidade', Object.entries(FINALIDADES)) : ''}
       ${inp('contrato', ehAvaliacao(v) ? 'Referência interna' : 'Contrato / referência')}
       ${ehAvaliacao(v) ? inpAv('acompanhante', 'Vistoria acompanhada por (nome / qualidade)') : ''}
+      <label class="check full"><input type="checkbox" data-fotodata ${v.fotoDataHora ? 'checked' : ''}>
+        <span>Imprimir no PDF a data e a hora de cada foto</span></label>
     </div>
 
-    ${ehAvaliacao(v) ? dadosAvaliacao(v) : dadosLocacao(v)}
+    ${ehAvaliacao(v) ? dadosAvaliacao(v) : ehRessalvas(v) ? dadosRessalvas(v) : dadosLocacao(v)}
 
     <h3>Textos do laudo</h3>
     <div class="grid">
@@ -1007,6 +1195,25 @@ const grupoPartes = (cat, extra = '') => `
     <div class="row"><button class="btn" data-act="addparte" data-cat="${cat}">+ Adicionar ${CATEGORIAS[cat].add}</button>${extra}</div>`;
 // categoria opcional ainda vazia: só o botão, ao lado do botão do grupo anterior
 const botaoAdd = cat => `<button class="btn" data-act="addparte" data-cat="${cat}">+ Adicionar ${CATEGORIAS[cat].add}</button>`;
+
+// campos da referência ao laudo ressalvado (guardados em cur.rs)
+function inpRs(k, rotulo, type = 'text', attrs = '') {
+  return `<label>${rotulo}<input type="${type}" data-r="${k}" value="${esc(cur.rs[k])}" ${attrs}></label>`;
+}
+function dadosRessalvas(v) {
+  return `${enderecoImovel()}
+    ${grupoPartes('locatarios')}
+    ${grupoPartes('locadores')}
+
+    <h3>Laudo de vistoria objeto das ressalvas</h3>
+    <div class="grid">
+      ${inpRs('dataOriginal', 'Data da vistoria do locador', 'date')}
+      ${inpRs('responsavelOriginal', 'Quem elaborou o laudo do locador')}
+      ${inpRs('dataRecebimento', 'Data em que o laudo foi recebido', 'date')}
+      ${inpRs('prazoDias', 'Prazo do contrato para ressalvas (dias)', 'text', 'inputmode="numeric" maxlength="3"')}
+      <p class="aviso full" id="prazo-rs" style="margin:0">${esc(textoPrazo(v))}</p>
+    </div>`;
+}
 
 function dadosLocacao(v) {
   return `${enderecoImovel()}
@@ -1153,7 +1360,7 @@ function painelComodo() {
     <div class="grid">
       <label>Nome do cômodo<input data-cf="nome" value="${esc(c.nome)}"></label>
       <label>Estado geral<select data-cf="estado">${ESTADOS.map(e => `<option value="${e}" ${e === c.estado ? 'selected' : ''}>${e || '—'}</option>`).join('')}</select></label>
-      <label class="full">Descrição (piso, paredes, teto, portas, janelas, instalações elétricas e hidráulicas, avarias…)
+      <label class="full">${ehRessalvas(cur) ? 'Divergências constatadas (descreva o que difere do laudo do locador e registre com fotos)' : 'Descrição (piso, paredes, teto, portas, janelas, instalações elétricas e hidráulicas, avarias…)'}
         <textarea data-cf="descricao" rows="7">${esc(c.descricao)}</textarea></label>
       ${botaoDitar('[data-cf="descricao"]', 'full')}
     </div>
@@ -1164,7 +1371,7 @@ function painelComodo() {
     </div>
     <div class="fotos">${c.fotos.map((f, i) => `
       <figure>
-        <img src="${f.data}" alt="Foto ${i + 1}">
+        <img src="${f.data}" alt="Foto ${i + 1}">${f.em ? `<span class="foto-data">${fmtDataHora(f.em)}</span>` : ''}
         <div class="legenda"><input data-pf="${i}" placeholder="Legenda da foto ${i + 1}" value="${esc(f.legenda)}">${botaoDitar(`[data-pf="${i}"]`, 'mini')}</div>
         <button class="x" data-act="delfoto" data-i="${i}" title="Remover foto">×</button>
       </figure>`).join('')}</div>
@@ -1199,6 +1406,15 @@ app.addEventListener('input', e => {
     return;
   }
   if (!cur) return;
+  if (t.dataset.r) {
+    cur.rs[t.dataset.r] = t.dataset.r === 'prazoDias' ? (t.value = t.value.replace(/\D/g, '').slice(0, 3)) : t.value;
+    const p = $('#prazo-rs'); if (p) p.textContent = textoPrazo(cur);
+    // a declaração padrão traz a data de recebimento: atualiza se o texto não foi ajustado à mão
+    if (t.dataset.r === 'dataRecebimento' && !(cur.declaracao || '').trim()) {
+      const d = app.querySelector('[data-f="declaracao"]'); if (d) d.value = declaracaoPadrao(cur);
+    }
+    salvar(); return;
+  }
   if (t.dataset.a) {
     const k = t.dataset.a;
     cur.av[k] = t.value;
@@ -1247,6 +1463,7 @@ app.addEventListener('input', e => {
 app.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'concordo') { $('[data-act=aceitar]').disabled = !t.checked; return; }
+  if (t.hasAttribute('data-fotodata')) { cur.fotoDataHora = t.checked; salvar(); return; }
   if (t.hasAttribute('data-moeda')) {
     // ao sair do campo de valor, formata: 450000 -> 450.000,00
     const n = numeroBR(t.value);
@@ -1280,8 +1497,9 @@ app.addEventListener('change', async e => {
   for (let i = 0; i < files.length; i++) {
     p.textContent = `Processando foto ${i + 1} de ${files.length}…`;
     try {
+      const em = await dataDaFoto(files[i]); // antes de comprimir: a compressão descarta os dados da câmera
       const r = await comprimir(files[i]);
-      c.fotos.push({ id: uid(), legenda: '', ...r });
+      c.fotos.push({ id: uid(), legenda: '', em, ...r });
     } catch { alert('Não foi possível ler o arquivo ' + files[i].name); }
   }
   await flush();
@@ -1296,6 +1514,18 @@ app.addEventListener('click', async e => {
     case 'nova': {
       const v = novaVistoria(d.tipo); await dbPut(v);
       cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
+    }
+    case 'derivarressalvas': {
+      // ressalvas do locatário a partir de um laudo prévio: mesmo imóvel, partes e cômodos (sem descrições)
+      const o = migrar(await dbGet(d.id));
+      const v = novaVistoria('ressalvas');
+      for (const k of ['rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'contrato']) v[k] = o[k];
+      v.partes.locadores = structuredClone(o.partes.locadores);
+      v.partes.locatarios = structuredClone(o.partes.locatarios);
+      v.rs.dataOriginal = o.data || '';
+      v.rs.responsavelOriginal = o.vistoriador || '';
+      v.comodos = o.comodos.map(c => novoComodo(c.nome, baseDe(c)));
+      await dbPut(v); cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
     }
     case 'derivar': {
       const o = migrar(await dbGet(d.id));
@@ -1440,7 +1670,7 @@ app.addEventListener('click', async e => {
 });
 
 // ---------- PDF: salvar, visualizar, compartilhar ----------
-const nomePDF = v => `${ehAvaliacao(v) ? 'Avaliacao' : 'Vistoria-' + (v.tipo === 'entrega' ? 'entrega' : 'previa')}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
+const nomePDF = v => `${{ previa: 'Vistoria-previa', entrega: 'Vistoria-entrega', ressalvas: 'Ressalvas-locatario', avaliacao: 'Avaliacao' }[v.tipo]}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
 async function montarPDF() {
   await flush();
   try { return gerarPDF(cur, await cfgGet()); }
@@ -1646,7 +1876,7 @@ function gerarPDF(v, cfg) {
 
   // Capa / identificação
   font(15, 'bold');
-  doc.text({ previa: 'LAUDO DE VISTORIA PRÉVIA (ENTRADA)', entrega: 'LAUDO DE VISTORIA DE ENTREGA DE CHAVES', avaliacao: 'LAUDO DE AVALIAÇÃO DE IMÓVEL' }[v.tipo], W / 2, y + 6, { align: 'center' });
+  doc.text(TITULO_PDF[v.tipo], W / 2, y + 6, { align: 'center' });
   y += 11;
   font(10); doc.setTextColor(90); doc.text(`Data da vistoria: ${fmtData(v.data)}`, W / 2, y + 3, { align: 'center' });
   if (ehJudicial(v) && v.av.processo) { y += 5; doc.text(`Processo nº ${v.av.processo}`, W / 2, y + 3, { align: 'center' }); }
@@ -1696,6 +1926,26 @@ function gerarPDF(v, cfg) {
     campo('Ocupação:', av.ocupacao);
     if (av.entorno.trim()) { y += 2; para('Entorno e infraestrutura:', 10, 'bold'); texto(av.entorno); }
     y += 3;
+  } else if (ehRessalvas(v)) {
+    secao(`${n++}. IDENTIFICAÇÃO`);
+    campo('Endereço:', (v.rua || '') + (v.numero ? ', nº ' + v.numero : ''));
+    campo('Complemento:', v.complemento);
+    campo('Bairro:', v.bairro);
+    campo('Cidade/UF:', cidadeUF(v));
+    campo('Contrato/referência:', v.contrato);
+    y += 2;
+    partesDe('locatarios');
+    partesDe('locadores');
+    y += 3;
+    secao(`${n++}. LAUDO DE VISTORIA OBJETO DAS RESSALVAS`);
+    campo('Data da vistoria:', fmtData(v.rs.dataOriginal));
+    campo('Elaborado por:', v.rs.responsavelOriginal);
+    campo('Recebido em:', fmtData(v.rs.dataRecebimento));
+    y += 3;
+    // a declaração fala das "divergências abaixo": vem antes da lista de cômodos
+    secao(`${n++}. DECLARAÇÃO`);
+    texto(textoDeclaracao(v));
+    y += 3;
   } else {
   secao(`${n++}. IDENTIFICAÇÃO`);
   campo('Endereço:', (v.rua || v.endereco || '') + (v.numero ? ', nº ' + v.numero : ''));
@@ -1725,7 +1975,7 @@ function gerarPDF(v, cfg) {
   if (v.obs) { secao(`${n++}. OBSERVAÇÕES GERAIS`); texto(v.obs); y += 3; }
 
   const nComodos = n++;
-  secao(`${nComodos}. CÔMODOS VISTORIADOS`);
+  secao(`${nComodos}. ${ehRessalvas(v) ? 'CÔMODOS COM DIVERGÊNCIAS' : 'CÔMODOS VISTORIADOS'}`);
   if (!v.comodos.length) para('Nenhum cômodo registrado.', 10, 'italic');
   v.comodos.forEach((c, i) => para(`${nComodos}.${i + 1}  ${c.nome}${c.estado ? ' - estado geral: ' + c.estado : ''}  (${c.fotos.length} foto${c.fotos.length === 1 ? '' : 's'})`));
 
@@ -1736,7 +1986,8 @@ function gerarPDF(v, cfg) {
     novaPag();
     secao(`${nComodos}.${i + 1}  ${(c.nome || 'Cômodo').toUpperCase()}`);
     campo('Estado geral:', c.estado);
-    if (c.descricao.trim()) texto(c.descricao); else para('Sem descrição.', 10, 'italic');
+    if (ehRessalvas(v)) para('Divergências constatadas:', 10, 'bold');
+    if (c.descricao.trim()) texto(c.descricao); else para(ehRessalvas(v) ? 'Sem divergências descritas.' : 'Sem descrição.', 10, 'italic');
     y += 4;
     for (let k = 0; k < c.fotos.length; k += 2) {
       const par = c.fotos.slice(k, k + 2).map(f => {
@@ -1744,7 +1995,8 @@ function gerarPDF(v, cfg) {
         if (h > MAXH) { h = MAXH; w = h * f.w / f.h; }
         fotoN++;
         font(8.5);
-        return { f, w, h, cap: doc.splitTextToSize(`Foto ${fotoN}${f.legenda ? ' - ' + f.legenda : ''}`, colW) };
+        const quando = v.fotoDataHora && f.em ? ` (${fmtDataHora(f.em)})` : ''; // opcional: data e hora da foto
+        return { f, w, h, cap: doc.splitTextToSize(`Foto ${fotoN}${f.legenda ? ' - ' + f.legenda : ''}${quando}`, colW) };
       });
       const rowH = Math.max(...par.map(p => p.h + 3 + p.cap.length * CAP_LH)) + 5;
       ensure(rowH);
@@ -1784,9 +2036,13 @@ function gerarPDF(v, cfg) {
 
   // Declaração e assinaturas
   if (ehAvaliacao(v)) ensure(90); else novaPag();
-  secao(`${n++}. ${ehAvaliacao(v) ? 'DECLARAÇÃO E ASSINATURA' : 'DECLARAÇÃO E ASSINATURAS'}`);
-  texto(textoDeclaracao(v));
-  y += 6;
+  if (ehRessalvas(v)) {
+    secao(`${n++}. LOCAL, DATA E ASSINATURAS`); // a declaração já veio antes dos cômodos
+  } else {
+    secao(`${n++}. ${ehAvaliacao(v) ? 'DECLARAÇÃO E ASSINATURA' : 'DECLARAÇÃO E ASSINATURAS'}`);
+    texto(textoDeclaracao(v));
+    y += 6;
+  }
   // local da assinatura = cidade/UF do imóvel vistoriado; sem cidade, deixa espaço para preencher à mão
   para(`${cidadeUF(v) || '______________________/____'}, ${extenso(v.data) || '____ de ______________ de ________'}.`);
   if (semLocatario(v)) {
@@ -1805,6 +2061,13 @@ function gerarPDF(v, cfg) {
   if (ehAvaliacao(v)) {
     // no laudo de avaliação, só o avaliador assina
     assinatura(v.vistoriador, 'AVALIADOR(A)' + (v.av.registroAvaliador ? ` - ${v.av.registroAvaliador}` : ''));
+  } else if (ehRessalvas(v)) {
+    // só os locatários assinam; o locador (ou representante) registra o recebimento
+    v.partes.locatarios.forEach(p => assinatura(p.nome, 'LOCATÁRIO(A)', p.doc));
+    ensure(40);
+    para('Recebido por: _______________________________________________', 10, 'bold');
+    y += 4;
+    para('Locador(a) ou representante, em ____/____/________.', 10);
   } else {
     // uma linha para cada locatário, locador e fiador (fiador em branco não gera linha)
     for (const cat of ['locatarios', 'locadores', 'fiadores']) {
@@ -1820,7 +2083,7 @@ function gerarPDF(v, cfg) {
   const total = doc.getNumberOfPages();
   font(8);
   const slh = 6, slw = logo ? Math.min(30, slh * logo.w / logo.h) : 0; // logo pequeno no cabeçalho (páginas 2+)
-  let cab = `${{ previa: 'Vistoria prévia', entrega: 'Vistoria de entrega de chaves', avaliacao: 'Laudo de avaliação' }[v.tipo]} - ${enderecoCompleto(v)}`;
+  let cab = `${TITULO_CURTO[v.tipo]} - ${enderecoCompleto(v)}`;
   while (doc.getTextWidth(cab) > CW - 25 - slw && cab.length > 10) cab = cab.slice(0, -4) + '...';
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
