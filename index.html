@@ -36,6 +36,20 @@ a.btn{text-decoration:none}
 /* tutorial: primeiro botão do menu, ocupando a linha inteira */
 .tile.tutorial{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center;background:var(--chip);border-color:var(--pri)}
 .tile.tutorial .ico{grid-row:span 2;font-size:30px}
+.tile.largo{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center}
+.tile.largo .ico{grid-row:span 2;font-size:30px}
+/* escolha do tipo de laudo */
+.tipos{display:grid;grid-template-columns:1fr;gap:6px;max-width:640px}
+.tile.tipo{min-height:0;width:100%}
+.link-tipo{font-size:13px;margin:0 0 10px 4px}
+/* lembrete de backup */
+.aviso-backup{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-color:#d97706;background:color-mix(in srgb,#f59e0b 10%,var(--card))}
+/* janela (enviar para edição) */
+.modal{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-caixa{background:var(--card);color:var(--ink);border-radius:14px;padding:18px;max-width:460px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.modal-caixa h2{margin-top:0}
+.modal-botoes{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.modal-botoes .btn{justify-content:center;padding:12px}
 /* tutorial */
 .tutorial-txt{line-height:1.6;scroll-margin-top:64px}
 .tutorial-txt h2{font-size:17px}
@@ -551,6 +565,9 @@ function sanitizar(o) {
   v.rs.responsavelOriginal = TXT(rs.responsavelOriginal, 300);
   v.rs.prazoDias = /^\d{1,3}$/.test(String(rs.prazoDias)) ? String(rs.prazoDias) : '10';
   v.fotoDataHora = o.fotoDataHora === true;
+  v.cabecalhoRecebido = sanitizarCabecalho(o.cabecalhoRecebido);
+  v.usarCabecalhoRecebido = o.usarCabecalhoRecebido === true && !!v.cabecalhoRecebido;
+  if (o.origem && typeof o.origem === 'object') v.origem = { autor: TXT(o.origem.autor, 200), arquivo: TXT(o.origem.arquivo, 300), em: Number(o.origem.em) || Date.now() };
   v.data = /^\d{4}-\d{2}-\d{2}$/.test(o.data) ? o.data : '';
   v.acompanhou = o.acompanhou === 'nao' ? 'nao' : 'sim';
   if (typeof o.id === 'string' && /^[a-z0-9]{4,40}$/i.test(o.id)) v.id = o.id;
@@ -569,9 +586,23 @@ function sanitizar(o) {
   }));
   return v;
 }
-async function pacote(vistorias) {
+// O cabeçalho (logo, nome e contato de quem elabora) viaja junto nos arquivos.
+function sanitizarCabecalho(c) {
+  if (!c || typeof c !== 'object') return null;
+  const r = { nome: TXT(c.nome, 200), contato: TXT(c.contato, 1000), logo: null };
+  const l = c.logo;
+  if (l && typeof l.data === 'string' && IMG_OK.test(l.data)) r.logo = { data: l.data, w: Math.max(1, +l.w || 1), h: Math.max(1, +l.h || 1) };
+  return r.nome || r.contato || r.logo ? r : null;
+}
+const mesmoCabecalho = (a, b) => !!a && !!b && a.nome === b.nome && a.contato === b.contato &&
+  ((a.logo && a.logo.data) || '') === ((b.logo && b.logo.data) || '');
+const cabecalhoVazio = c => !c || (!c.nome && !c.contato && !c.logo);
+
+// backup = true: cópia de segurança de todas as vistorias e do cadastro deste aparelho
+async function pacote(vistorias, backup = false) {
   const cfg = await cfgGet();
-  return { formato: FORMATO, versao: 1, exportadoEm: new Date().toISOString(), autor: cfg.nome || '', vistorias };
+  return { formato: FORMATO, versao: 2, backup, exportadoEm: new Date().toISOString(), autor: cfg.nome || '',
+    responsavel: { nome: cfg.nome || '', contato: cfg.contato || '', logo: cfg.logo || null }, vistorias };
 }
 // estrito: só aceita arquivos gerados pelo aplicativo (usado ao ler a pasta compartilhada)
 function lerPacote(texto, estrito = false) {
@@ -580,46 +611,128 @@ function lerPacote(texto, estrito = false) {
   if (estrito && !doApp) return null;
   const lista = doApp ? d.vistorias : [].concat(d); // também aceita os backups das versões anteriores
   const vistorias = lista.filter(v => v && typeof v === 'object' && Array.isArray(v.comodos)).map(sanitizar);
-  return { autor: doApp ? TXT(d.autor, 200) : '', vistorias };
+  return {
+    autor: doApp ? TXT(d.autor, 200) : '',
+    backup: doApp && d.backup === true,
+    responsavel: doApp ? sanitizarCabecalho(d.responsavel) : null,
+    vistorias
+  };
 }
 const nomeArquivoLaudo = v => nomePDF(v).replace(/\.pdf$/, '.json');
-// Grava no aparelho; se já existe um laudo com o mesmo código (ex.: ele voltou de outra pessoa), pergunta.
-async function importar(v, origem) {
+
+// Laudo recebido de outra pessoa: grava no aparelho e decide qual cabeçalho o PDF vai usar.
+// Se já existe um laudo com o mesmo código (ex.: ele voltou de outra pessoa), pergunta.
+async function importar(v, origem, responsavel) {
   const existente = await dbGet(v.id);
   if (existente) {
     const substituir = confirm(`Já existe neste aparelho uma cópia do laudo "${enderecoCompleto(v) || 'sem endereço'}".\n\n` +
       'OK = substituir pela versão do arquivo\nCancelar = importar como uma nova cópia');
     if (!substituir) v.id = uid();
   }
+  // cabeçalho com que o remetente gerava o PDF (o dele, ou o que ele próprio tinha recebido)
+  const doRemetente = v.usarCabecalhoRecebido && v.cabecalhoRecebido ? v.cabecalhoRecebido : responsavel;
+  const meu = await cfgGet();
+  if (doRemetente && !mesmoCabecalho(doRemetente, meu)) {
+    v.cabecalhoRecebido = doRemetente;
+    v.usarCabecalhoRecebido = confirm(`Este laudo veio com o cabeçalho de "${doRemetente.nome || 'quem enviou'}" (logo, nome e contato).\n\n` +
+      'OK = manter o cabeçalho de quem enviou\nCancelar = usar o meu cabeçalho\n\nA escolha pode ser trocada depois, dentro do laudo.');
+  } else {
+    v.usarCabecalhoRecebido = false;
+  }
   v.origem = origem;
   await dbPut(v);
   return v;
 }
-async function enviarParaEdicao(v) {
-  const blob = new Blob([JSON.stringify(await pacote([v]))], { type: 'application/json' });
-  const nome = nomeArquivoLaudo(v);
-  const h = suportaPastas ? await pasta('pastaCompart') : null;
-  if (h) {
-    try {
-      if (await permitir(h)) {
-        await gravarNaPasta(h, nome, blob);
-        alert(`Laudo enviado para a pasta compartilhada "${h.name}".\nQuem tiver acesso a essa pasta pode importá-lo em "Laudos de outras pessoas".`);
-        return;
-      }
-    } catch (err) { alert(`Não foi possível gravar na pasta "${h.name}" (${err.message}).`); }
+
+// Cópia de segurança: restaura as vistorias (uma única pergunta sobre as que já existem) e o cadastro.
+async function restaurarBackup(p) {
+  const existentes = [];
+  for (const v of p.vistorias) if (await dbGet(v.id)) existentes.push(v.id);
+  const substituir = existentes.length > 0 && confirm(`${existentes.length} laudo(s) deste backup já existe(m) neste aparelho.\n\n` +
+    'OK = substituir pelas versões do backup\nCancelar = manter as deste aparelho (só os laudos novos serão importados)');
+  let n = 0;
+  for (const v of p.vistorias) {
+    if (existentes.includes(v.id) && !substituir) continue;
+    await dbPut(v); n++;
   }
-  // celular: envia pelo WhatsApp, e-mail etc. Alguns aparelhos só aceitam enviar como .txt.
-  const opcoes = [new File([blob], nome, { type: 'application/json' }), new File([blob], nome.replace(/\.json$/, '.txt'), { type: 'text/plain' })];
-  for (const arq of opcoes) {
-    if (navigator.canShare && navigator.canShare({ files: [arq] })) {
-      try {
-        await navigator.share({ files: [arq], title: 'Laudo de vistoria para edição', text: `Arquivo do aplicativo Vistoria de Imóveis - ${enderecoCompleto(v)}` });
-      } catch (err) { if (err.name !== 'AbortError') alert('Não foi possível enviar: ' + err.message); }
-      return;
+  let cadastro = false;
+  if (p.responsavel) {
+    const meu = await cfgGet();
+    if (cabecalhoVazio(meu) || (!mesmoCabecalho(p.responsavel, meu) &&
+        confirm(`O backup contém o cadastro do responsável "${p.responsavel.nome || 'sem nome'}" (logo, nome e contato).\n\nDeseja substituir o cadastro deste aparelho por ele?`))) {
+      await cfgPut(Object.assign(meu, p.responsavel));
+      cadastro = true;
     }
   }
-  baixar(blob, nome);
-  alert('O arquivo do laudo foi salvo no aparelho.\nEnvie-o para a outra pessoa, que deve abri-lo no aplicativo em "Laudos de outras pessoas" → "Importar arquivo".');
+  return { n, cadastro };
+}
+
+// Janela "Enviar para edição": monta o arquivo primeiro e só depois oferece as opções,
+// para que o toque em "Compartilhar" seja um gesto novo do usuário (exigência dos celulares).
+async function abrirEnvio(v) {
+  const ov = document.createElement('div');
+  ov.className = 'modal';
+  ov.innerHTML = '<div class="modal-caixa"><h2>📨 Enviar para edição</h2><p class="muted">Preparando o arquivo…</p></div>';
+  document.body.appendChild(ov);
+  const caixa = ov.firstElementChild;
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = e => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  let blob, nome, compartilhavel = null, h = null;
+  try {
+    blob = new Blob([JSON.stringify(await pacote([v]))], { type: 'application/json' });
+    nome = nomeArquivoLaudo(v);
+    // alguns celulares não aceitam compartilhar .json: nesse caso o mesmo conteúdo vai como .txt
+    const opcoes = [new File([blob], nome, { type: 'application/json' }), new File([blob], nome.replace(/\.json$/, '.txt'), { type: 'text/plain' })];
+    if (navigator.canShare) compartilhavel = opcoes.find(a => { try { return navigator.canShare({ files: [a] }); } catch { return false; } }) || null;
+    h = suportaPastas ? await pasta('pastaCompart') : null;
+  } catch (err) {
+    caixa.innerHTML = `<h2>📨 Enviar para edição</h2><p class="aviso">Não foi possível preparar o arquivo (${esc(err.message)}).</p>
+      <div class="modal-botoes"><button class="btn" data-e="fechar">Fechar</button></div>`;
+    caixa.addEventListener('click', e => { if (e.target.closest('[data-e="fechar"]')) fechar(); });
+    return;
+  }
+  const mb = (blob.size / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+  caixa.innerHTML = `
+    <h2>📨 Enviar para edição</h2>
+    <p style="margin-top:0">Gera um <strong>arquivo do laudo</strong> (dados e fotos, ${mb} MB) para outra pessoa abrir
+      <strong>no aplicativo dela</strong>, em <strong>Laudos de outras pessoas → Importar arquivo</strong>, e continuar editando.
+      <span class="muted">Não é o PDF.</span></p>
+    <p class="muted">O arquivo leva também o seu cabeçalho (logo, nome e contato); quem receber escolhe se o mantém no PDF.</p>
+    <p class="aviso" id="envio-msg" hidden></p>
+    <div class="modal-botoes">
+      ${compartilhavel ? '<button class="btn primary" data-e="compartilhar">📤 Compartilhar (WhatsApp, e-mail…)</button>' : ''}
+      ${h ? `<button class="btn" data-e="pasta">📁 Gravar na pasta "${esc(h.name)}"</button>` : ''}
+      <button class="btn${compartilhavel ? '' : ' primary'}" data-e="salvar">💾 Salvar arquivo no aparelho</button>
+      <button class="btn" data-e="fechar">Fechar</button>
+    </div>`;
+  const msg = t => { const m = caixa.querySelector('#envio-msg'); m.hidden = false; m.textContent = t; };
+  caixa.addEventListener('click', async e => {
+    const b = e.target.closest('[data-e]'); if (!b) return;
+    if (b.dataset.e === 'fechar') return fechar();
+    if (b.dataset.e === 'salvar') {
+      baixar(blob, nome);
+      return msg(`Arquivo "${nome}" salvo no aparelho (normalmente na pasta Downloads). Envie-o à outra pessoa pelo WhatsApp, e-mail ou outro meio.`);
+    }
+    if (b.dataset.e === 'pasta') {
+      try {
+        if (!(await permitir(h))) return msg('Sem permissão para gravar na pasta compartilhada.');
+        await gravarNaPasta(h, nome, blob);
+        return msg(`Laudo gravado na pasta "${h.name}". Quem tiver acesso a ela pode importá-lo em "Laudos de outras pessoas".`);
+      } catch (err) { return msg(`Não foi possível gravar na pasta (${err.message}). Use "Salvar arquivo no aparelho".`); }
+    }
+    if (b.dataset.e === 'compartilhar') {
+      const t0 = Date.now();
+      try {
+        await navigator.share({ files: [compartilhavel], title: 'Laudo para edição', text: `Arquivo do aplicativo Vistoria de Imóveis - ${enderecoCompleto(v)}` });
+        fechar(); flash('Arquivo enviado ✓', 3000);
+      } catch (err) {
+        // "cancelado" logo após o toque costuma ser falha do aparelho, e não desistência do usuário
+        if (err.name === 'AbortError' && Date.now() - t0 > 1500) return;
+        msg(`Este aparelho não conseguiu abrir o compartilhamento${err.message ? ` (${err.message})` : ''}. Use "Salvar arquivo no aparelho" e envie o arquivo pelo WhatsApp ou e-mail.`);
+      }
+    }
+  });
 }
 
 // ---------- Ditado por voz ----------
@@ -754,26 +867,31 @@ async function rotear() {
   cur = null;
   scrollTo(0, 0);
   if (nome === 'tutorial') return telaTutorial(id); // #/tutorial/<seção>
-  const telas = { vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig, termos: telaTermos };
+  const telas = { novo: telaNovo, vistorias: telaVistorias, recebidos: telaRecebidos, cadastro: telaCadastro, config: telaConfig, termos: telaTermos };
   (telas[nome] || telaInicio)();
 }
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.6';
+const VERSAO_APP = '1.7';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
   topo('Vistoria de Imóveis', null);
-  const [todas, cfg] = await Promise.all([dbAll(), cfgGet()]);
+  const [todas, cfg, ub] = await Promise.all([dbAll(), cfgGet(), cfgLer('ultimoBackup')]);
+  // lembrete: com laudos salvos e sem backup há 7 dias ou mais
+  const diasBackup = ub ? Math.floor((Date.now() - ub.em) / 86400000) : null;
+  const lembrarBackup = todas.length > 0 && (diasBackup === null || diasBackup >= 7);
   app.innerHTML = `
   <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
+  ${lembrarBackup ? `<section class="card aviso-backup">
+    <div><strong>💾 ${diasBackup === null ? 'Você ainda não fez backup das suas vistorias.' : `Seu último backup foi há ${diasBackup} dias.`}</strong>
+      <div class="muted">As vistorias e o cadastro ficam só neste aparelho. Se o aplicativo for desinstalado ou os dados do navegador forem apagados, eles se perdem.</div></div>
+    <button class="btn primary" data-act="backuptodas">Fazer backup agora</button>
+  </section>` : ''}
   <div class="menu">
     <a class="tile tutorial" href="#/tutorial"><span class="ico">📘</span><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></a>
-    <button class="tile primary" data-act="nova" data-tipo="previa"><span class="ico">🏠</span><strong>Nova vistoria prévia</strong><small>Entrada do locatário</small></button>
-    <button class="tile primary" data-act="nova" data-tipo="entrega"><span class="ico">🔑</span><strong>Nova vistoria de entrega</strong><small>Devolução das chaves</small></button>
-    <button class="tile primary" data-act="nova" data-tipo="ressalvas"><span class="ico">✍️</span><strong>Nova vistoria de ressalvas</strong><small>Divergências do locatário sobre o laudo recebido</small></button>
-    <button class="tile primary" data-act="nova" data-tipo="avaliacao"><span class="ico">💰</span><strong>Nova avaliação de imóvel</strong><small>Laudo com valor de venda e/ou locação</small></button>
+    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Vistoria prévia, de entrega, ressalvas do locatário ou avaliação</small></a>
     <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
     <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
     <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
@@ -787,6 +905,23 @@ async function telaInicio() {
     <a href="#/termos">Termos de Uso e Responsabilidades</a>
   </footer>`;
   atualizarInstalar();
+}
+
+// Escolha do tipo de laudo (único ponto de criação de laudos novos)
+function telaNovo() {
+  topo('Novo laudo', 'inicio');
+  const tipos = [
+    ['previa', '🏠', 'Vistoria prévia (entrada)', 'Registra o estado do imóvel no início da locação. É a referência para a devolução.'],
+    ['entrega', '🔑', 'Vistoria de entrega de chaves', 'Registra o estado do imóvel na devolução, para comparar com a vistoria de entrada.'],
+    ['ressalvas', '✍️', 'Vistoria de ressalvas do locatário', 'O locatário aponta as divergências que encontrou no laudo recebido do locador.'],
+    ['avaliacao', '💰', 'Laudo de avaliação de imóvel', 'Caracteriza o imóvel e indica valores estimados de venda e/ou locação (judicial ou extrajudicial).']
+  ];
+  app.innerHTML = `
+  <p class="saudacao">Qual laudo você vai fazer?</p>
+  <div class="tipos">${tipos.map(([t, ico, nome, desc]) => `
+    <button class="tile tipo" data-act="nova" data-tipo="${t}"><span class="ico">${ico}</span><strong>${nome}</strong><small>${desc}</small></button>
+    <a class="link-tipo" href="#/tutorial/${t}">📘 Saiba mais sobre este laudo</a>`).join('')}
+  </div>`;
 }
 
 // TERMOS_VERSAO identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
@@ -889,17 +1024,19 @@ function telaTutorial(secao) {
     <li>Vá com a <strong>bateria carregada</strong> e, se possível, durante o dia: luz natural melhora muito as fotos.</li>
     <li>Combine com as partes quem vai acompanhar a vistoria. A presença do locatário reduz discussões futuras.</li>
     <li>Leve o contrato e, na entrega das chaves ou nas ressalvas, o laudo de entrada, para comparar.</li>
+    <li><strong>Atenção:</strong> as atualizações do aplicativo não apagam seus dados, mas <strong>desinstalar o aplicativo, limpar os dados do navegador ou trocar de navegador</strong> faz as vistorias e o cadastro sumirem deste aparelho. Antes disso, faça um backup.</li>
   </ul>`)}
 
   ${s('app', '2. Passo a passo no aplicativo', `<ol>
-    <li>Na tela inicial, escolha o tipo: <strong>vistoria prévia</strong>, <strong>de entrega</strong>, <strong>ressalvas do locatário</strong> ou <strong>avaliação</strong>.</li>
+    <li>Na tela inicial, toque em <strong>➕ Novo laudo</strong> e escolha o tipo: <strong>vistoria prévia</strong>, <strong>de entrega</strong>, <strong>ressalvas do locatário</strong> ou <strong>avaliação</strong>.</li>
     <li>Preencha os dados do imóvel e das partes. Use <strong>+ Adicionar</strong> para incluir mais de um locador, locatário ou fiador, e “Mesmo endereço do(a) … 1” para não repetir endereços.</li>
     <li>Em <strong>Cômodos</strong>, toque em <strong>+ Cômodo</strong> e escolha o tipo. Cômodos repetidos são numerados sozinhos (Quarto 01, Quarto 02…).</li>
     <li>Em cada cômodo, informe o estado geral, escreva a descrição (ou use <strong>🎤 Ditar</strong>) e tire as fotos com <strong>📷 Tirar foto</strong>. Dê uma legenda a cada foto.</li>
     <li>Se quiser, marque <strong>“Imprimir no PDF a data e a hora de cada foto”</strong>: isso reforça o valor de prova das fotos.</li>
     <li>Revise tudo em <strong>👁️ Visualizar</strong>. Depois use <strong>⬇️ Salvar PDF</strong> ou <strong>📤 Compartilhar PDF</strong>.</li>
     <li>Imprima ou envie o PDF para assinatura. As partes assinam ao final e rubricam todas as páginas.</li>
-    <li>Para outra pessoa continuar o trabalho, use <strong>📨 Enviar p/ edição</strong>. Faça também o <strong>Backup de todas</strong> com frequência: as vistorias ficam só neste aparelho.</li>
+    <li>Para outra pessoa continuar o trabalho, use <strong>📨 Enviar p/ edição</strong>: o aplicativo gera um <strong>arquivo do laudo</strong> (não é o PDF), que a outra pessoa abre em <strong>Laudos de outras pessoas → Importar arquivo</strong>. O arquivo leva o seu cabeçalho, e quem recebe escolhe se o mantém.</li>
+    <li>Faça o <strong>💾 Backup de todas</strong> com frequência e guarde o arquivo fora do celular: as vistorias e o cadastro ficam só neste aparelho. O aplicativo lembra você na tela inicial quando o último backup tiver mais de 7 dias.</li>
   </ol>`)}
 
   ${s('praticas', '3. Boas práticas de vistoria', `<ul>
@@ -967,12 +1104,9 @@ async function telaVistorias() {
   app.innerHTML = `
   <div class="row between" style="margin-bottom:12px">
     <div class="row">
-      <button class="btn primary" data-act="nova" data-tipo="previa">+ Vistoria prévia</button>
-      <button class="btn primary" data-act="nova" data-tipo="entrega">+ Vistoria de entrega</button>
-      <button class="btn primary" data-act="nova" data-tipo="ressalvas">+ Ressalvas do locatário</button>
-      <button class="btn primary" data-act="nova" data-tipo="avaliacao">+ Avaliação</button>
+      <a class="btn primary" href="#/novo">+ Novo laudo</a>
     </div>
-    ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias num único arquivo">💾 Backup de todas</button>' : ''}
+    ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias e o cadastro do responsável num único arquivo">💾 Backup de todas</button>' : ''}
   </div>
   <section class="card">
     ${todas.length ? `
@@ -989,7 +1123,7 @@ async function telaVistorias() {
           <button class="btn" data-act="enviar" data-id="${v.id}" title="Envia o laudo para outra pessoa continuar a edição">📨 Enviar p/ edição</button>
           <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
         </div>
-      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda. Comece uma nova pelos botões acima.</p>'}
+      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda. Comece pelo botão “+ Novo laudo”.</p>'}
   </section>`;
 }
 
@@ -1018,6 +1152,7 @@ async function telaCadastro() {
 async function telaConfig() {
   topo('Configurações', 'inicio');
   const [pPDF, pComp] = suportaPastas ? await Promise.all([pasta('pastaPDF'), pasta('pastaCompart')]) : [null, null];
+  const ub = await cfgLer('ultimoBackup');
   const semSuporte = `<p class="aviso">Neste aparelho o navegador não permite escolher pastas${/android|iphone|ipad/i.test(navigator.userAgent) ? ' (é uma limitação dos celulares)' : ''}.
     ${/iphone|ipad/i.test(navigator.userAgent) ? 'Use <strong>Compartilhar PDF → Salvar em Arquivos</strong> para escolher onde guardar.' : 'Os arquivos vão para a pasta <strong>Downloads</strong>; você também pode usar <strong>Compartilhar</strong> para enviá-los ao Drive ou a outra pasta.'}
     No computador (Chrome ou Edge) esta opção fica disponível.</p>`;
@@ -1047,7 +1182,30 @@ async function telaConfig() {
     <p>🎤 Ditado por voz: ${temDitado
       ? '<strong>disponível neste navegador</strong>. Funciona somente com internet; o microfone será autorizado no primeiro uso.'
       : '<strong>não disponível neste navegador</strong>. Use o Chrome (Android ou computador), o Edge ou o Safari (iPhone), ou o microfone do teclado do celular.'}</p>
+  </section>
+  <section class="card">
+    <h2>🛡️ Proteção dos seus dados</h2>
+    <p style="margin-top:0">As vistorias e o cadastro do responsável ficam guardados <strong>somente neste aparelho e neste navegador</strong>.
+      As atualizações do aplicativo não os apagam, mas eles se perdem se o aplicativo for <strong>desinstalado</strong>,
+      se os <strong>dados do navegador forem limpos</strong> ou se o aparelho for trocado. Um navegador diferente
+      (por exemplo, Chrome e Samsung Internet) tem dados separados.</p>
+    <p id="persistencia" class="muted">Verificando a proteção do armazenamento…</p>
+    <p>${ub ? `Último backup: <strong>${new Date(ub.em).toLocaleString('pt-BR')}</strong>.` : '<strong>Nenhum backup feito ainda.</strong>'}
+      O backup inclui todas as vistorias e o cadastro do responsável (logo, nome e contato). Guarde uma cópia fora do aparelho (Drive, e-mail, computador).</p>
+    <div class="row">
+      <button class="btn primary" data-act="backuptodas">💾 Fazer backup agora</button>
+      <a class="btn" href="#/recebidos">Restaurar um backup</a>
+    </div>
   </section>`;
+  // o navegador pode apagar dados de sites sem esta proteção quando falta espaço
+  const el = $('#persistencia');
+  if (el && navigator.storage && navigator.storage.persisted) {
+    const ok = await navigator.storage.persisted();
+    el.className = ok ? '' : 'aviso';
+    el.innerHTML = ok
+      ? '✓ O navegador está instruído a <strong>não apagar</strong> os dados deste aplicativo para liberar espaço.'
+      : '⚠️ O navegador ainda não garantiu que manterá os dados deste aplicativo quando faltar espaço. Instalar o aplicativo costuma resolver. <button class="btn" data-act="persistir">Pedir proteção</button>';
+  } else if (el) el.textContent = 'Este navegador não informa a proteção do armazenamento.';
 }
 
 async function telaRecebidos() {
@@ -1087,7 +1245,7 @@ async function listarPasta(h) {
       try {
         const f = await fh.getFile();
         const p = lerPacote(await f.text(), true);
-        if (p) p.vistorias.forEach(v => achados.push({ v, autor: p.autor, arquivo: nome, mod: f.lastModified }));
+        if (p && !p.backup) p.vistorias.forEach(v => achados.push({ v, autor: p.autor, responsavel: p.responsavel, arquivo: nome, mod: f.lastModified }));
       } catch { /* arquivo que não é laudo: ignora */ }
     }
   } catch (err) {
@@ -1123,11 +1281,15 @@ function telaEditor() {
     <button class="btn" data-act="enviar" data-id="${v.id}">📨 Enviar p/ edição</button>
   </div>
   ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
+  ${v.cabecalhoRecebido ? `<div class="aviso row between">
+    <span>🪪 Cabeçalho do PDF: <strong>${v.usarCabecalhoRecebido ? `de quem enviou (${esc(v.cabecalhoRecebido.nome || 'sem nome')})` : 'o seu'}</strong></span>
+    <button class="btn" data-act="trocarcabecalho">${v.usarCabecalhoRecebido ? 'Usar o meu cabeçalho' : `Usar o de ${esc(v.cabecalhoRecebido.nome || 'quem enviou')}`}</button>
+  </div>` : ''}
   <section class="card">
     <p class="link-tutorial"><a href="#/tutorial/${v.tipo}">📘 Dúvidas? Veja o tutorial</a></p>
     <h2>${ehAvaliacao(v) ? 'Dados do laudo' : 'Dados da vistoria'}</h2>
     <div class="grid">
-      <label>Tipo<select data-f="tipo">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === v.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <div class="full muted">Tipo de laudo: <strong style="color:var(--ink)">${TIPOS[v.tipo]}</strong></div>
       ${inp('data', 'Data da vistoria', 'date')}
       ${v.tipo === 'previa' ? `<label>O(a) locatário(a) acompanhou a vistoria?<select data-f="acompanhou">
         <option value="sim" ${v.acompanhou !== 'nao' ? 'selected' : ''}>Sim, acompanhou</option>
@@ -1541,12 +1703,18 @@ app.addEventListener('click', async e => {
     case 'enviar': {
       if (cur) await flush();
       const v = cur && cur.id === d.id ? cur : migrar(await dbGet(d.id));
-      await enviarParaEdicao(v); break;
+      await abrirEnvio(v); break;
     }
     case 'backuptodas': {
-      const todas = await dbAll();
-      baixar(new Blob([JSON.stringify(await pacote(todas))], { type: 'application/json' }), `Backup-vistorias-${hoje()}.json`);
-      flash('Backup salvo ✓', 3000); break;
+      if (cur) await flush();
+      const todas = (await dbAll()).map(migrar);
+      // inclui o cadastro do responsável (logo, nome e contato), restaurado junto ao importar
+      baixar(new Blob([JSON.stringify(await pacote(todas, true))], { type: 'application/json' }), `Backup-vistorias-${hoje()}.json`);
+      await cfgGravar({ id: 'ultimoBackup', em: Date.now() });
+      alert(`Backup salvo no aparelho (normalmente na pasta Downloads), com ${todas.length} laudo(s) e o cadastro do responsável.\n\n` +
+        'Guarde uma cópia fora do celular (Drive, e-mail, computador). Para restaurar: Laudos de outras pessoas → Importar arquivo.');
+      if (location.hash === '#/inicio' || !location.hash) telaInicio();
+      break;
     }
     case 'importararquivo': {
       const i = document.createElement('input');
@@ -1554,10 +1722,16 @@ app.addEventListener('click', async e => {
       i.onchange = async () => {
         const importadas = [];
         for (const f of i.files) {
-          try {
-            const p = lerPacote(await f.text());
-            for (const v of p.vistorias) importadas.push(await importar(v, { autor: p.autor, arquivo: f.name, em: Date.now() }));
-          } catch { alert(`O arquivo "${f.name}" não é um laudo válido deste aplicativo.`); }
+          let p;
+          try { p = lerPacote(await f.text()); } catch { alert(`O arquivo "${f.name}" não é um laudo válido deste aplicativo.`); continue; }
+          if (p.backup) {
+            // cópia de segurança: restaura vistorias e cadastro, sem marcar como "recebido de"
+            const r = await restaurarBackup(p);
+            alert(`Backup restaurado: ${r.n} laudo(s) importado(s)${r.cadastro ? ' e cadastro do responsável restaurado' : ''}.`);
+            ir('vistorias');
+            return;
+          }
+          for (const v of p.vistorias) importadas.push(await importar(v, { autor: p.autor, arquivo: f.name, em: Date.now() }, p.responsavel));
         }
         if (importadas.length === 1) { flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + importadas[0].id); }
         else if (importadas.length) { flash(`${importadas.length} laudos importados ✓`, 3000); ir('vistorias'); }
@@ -1571,7 +1745,7 @@ app.addEventListener('click', async e => {
     }
     case 'importarpasta': {
       const a = laudosNaPasta[+d.i]; if (!a) return;
-      const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() });
+      const v = await importar(structuredClone(a.v), { autor: a.autor, arquivo: a.arquivo, em: Date.now() }, a.responsavel);
       flash('Laudo importado ✓', 3000); cur = null; ir('vistoria/' + v.id); break;
     }
     case 'addparte': {
@@ -1634,6 +1808,11 @@ app.addEventListener('click', async e => {
       if (!confirm('Remover o logo?')) return;
       const c = await cfgGet(); c.logo = null; await cfgPut(c); telaCadastro(); break;
     }
+    case 'trocarcabecalho':
+      cur.usarCabecalhoRecebido = !cur.usarCabecalhoRecebido; salvar(); telaEditor(); break;
+    case 'persistir':
+      if (navigator.storage && navigator.storage.persist) await navigator.storage.persist();
+      telaConfig(); break;
     case 'restaurardecl':
       if ((cur.declaracao || '').trim() && !confirm('Descartar os ajustes e voltar ao texto padrão?')) return;
       cur.declaracao = ''; salvar(); telaEditor(); break;
@@ -1772,6 +1951,8 @@ async function abrirPrevia(doc, v) {
 // ---------- PDF: montagem ----------
 function gerarPDF(v, cfg) {
   migrar(v);
+  // laudo recebido em que se escolheu manter o cabeçalho de quem enviou
+  if (v.usarCabecalhoRecebido && v.cabecalhoRecebido) cfg = v.cabecalhoRecebido;
   if (!window.jspdf) { alert('A biblioteca de PDF não carregou. Verifique a conexão com a internet e recarregue a página.'); return null; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });

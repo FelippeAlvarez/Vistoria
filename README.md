@@ -21,6 +21,8 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 ## O que o aplicativo faz
 
 - **Tela inicial** com acesso direto a: nova vistoria prévia, nova vistoria de entrega, minhas vistorias, laudos de outras pessoas, cadastro do responsável e configurações.
+- **Botão único "Novo laudo"**, que leva à escolha do tipo (prévia, entrega, ressalvas do locatário ou avaliação), com explicação de cada um.
+- **Proteção dos dados:** backup completo (vistorias e cadastro do responsável com logo), lembrete na tela inicial quando o último backup tiver mais de 7 dias e indicação, em Configurações, da proteção do armazenamento.
 - **Tutorial "Como fazer uma vistoria"**, primeiro botão da tela inicial: uso do aplicativo, boas práticas de vistoria, dicas por tipo de laudo e cuidados com dados pessoais.
 - **Vistoria de ressalvas do locatário**: o locatário registra, cômodo a cômodo e com fotos, as divergências em relação ao laudo recebido do locador (feito ou não neste aplicativo). Declaração automática no singular ou plural, data-limite informativa do prazo contratual, assinatura dos locatários e campo "Recebido por". Pode ser criada a partir de uma vistoria prévia ("Criar ressalvas").
 - **Data e hora das fotos no PDF** (opcional, em qualquer tipo de laudo), lidas dos dados da câmera ou, na falta deles, do arquivo.
@@ -56,6 +58,15 @@ Por isso:
 | `sw.js` | Guarda o aplicativo no aparelho para funcionar sem internet. |
 | `lib/` | Bibliotecas de terceiros: [jsPDF](https://github.com/parallax/jsPDF) 2.5.1 (licença MIT), que gera o PDF, e [pdf.js](https://github.com/mozilla/pdf.js) 3.11.174 (licença Apache 2.0), que exibe a prévia. |
 | `icons/` | Ícones do aplicativo. |
+
+## Regra de atualização: os dados do usuário nunca podem ser perdidos
+
+Nenhuma versão nova pode apagar, renomear ou tornar inacessíveis as vistorias ou o cadastro do responsável (logo, nome e contato) já salvos nos aparelhos. Por isso:
+
+- o banco de dados no aparelho só recebe **acréscimos** (novos campos com valor padrão); campos e áreas existentes nunca são removidos;
+- dados de versões anteriores são convertidos ao abrir (funções `migrar` e `sanitizar`);
+- **antes de cada publicação**, a versão nova é testada sobre dados criados pela versão anterior (vistorias de todos os tipos, fotos e cadastro com logo), confirmando que tudo continua presente e gera o PDF;
+- cada versão publicada é marcada no Git (`vX.Y`) para permitir a volta rápida.
 
 ## Como publicar uma nova versão
 
