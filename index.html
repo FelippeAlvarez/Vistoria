@@ -38,6 +38,10 @@ a.btn{text-decoration:none}
 .tile.tutorial .ico{grid-row:span 2;font-size:30px}
 .tile.largo{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center}
 .tile.largo .ico{grid-row:span 2;font-size:30px}
+/* tela inicial: todos os botões no formato do "Novo laudo" (largura total, ícone à esquerda, mesma altura) */
+.menu{grid-template-columns:1fr;max-width:640px}
+.menu .tile{grid-column:1/-1;min-height:96px;display:grid;grid-template-columns:44px 1fr;column-gap:12px;align-items:center;padding:14px 16px}
+.menu .tile .ico{grid-row:span 2;font-size:30px;text-align:center}
 /* escolha do tipo de laudo */
 .tipos{display:grid;grid-template-columns:1fr;gap:6px;max-width:640px}
 .tile.tipo{min-height:0;width:100%}
@@ -79,8 +83,8 @@ a.btn{text-decoration:none}
 .tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);margin-left:6px}
 @media (max-width:600px){
   main{padding:12px}
-  .menu{grid-template-columns:1fr 1fr;gap:10px}
-  .tile{min-height:120px;padding:14px}
+  .menu{gap:10px}
+  .tile{padding:14px}
   .acoes{grid-template-columns:1fr 1fr}
 }
 main{max-width:960px;margin:0 auto;padding:16px}
@@ -873,7 +877,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.7';
+const VERSAO_APP = '1.8';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -891,7 +895,7 @@ async function telaInicio() {
   </section>` : ''}
   <div class="menu">
     <a class="tile tutorial" href="#/tutorial"><span class="ico">📘</span><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></a>
-    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Vistoria prévia, de entrega, ressalvas do locatário ou avaliação</small></a>
+    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Prévia, entrega, ressalvas ou avaliação</small></a>
     <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
     <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
     <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
