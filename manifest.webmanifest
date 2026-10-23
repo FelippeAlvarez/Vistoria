@@ -1,7 +1,7 @@
 {
-  "name": "Vistoria de Imóveis",
-  "short_name": "Vistoria",
-  "description": "Laudos de vistoria de imóveis para locação: vistoria prévia e de entrega de chaves, com fotos por cômodo e PDF.",
+  "name": "Laudar - Vistoria de Imóveis",
+  "short_name": "Laudar",
+  "description": "Laudar: laudos de vistoria de imóveis (prévia, entrega, ressalvas do locatário, constatação de problema e avaliação), com fotos por cômodo e PDF.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

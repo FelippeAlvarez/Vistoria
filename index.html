@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Vistoria de Imóveis</title>
-<meta name="description" content="Laudos de vistoria de imóveis para locação: vistoria prévia e de entrega de chaves, com fotos por cômodo e PDF.">
+<title>Laudar · Vistoria de Imóveis</title>
+<meta name="description" content="Laudar: laudos de vistoria de imóveis (prévia, entrega, ressalvas do locatário, constatação de problema e avaliação), com fotos por cômodo e PDF.">
 <meta name="theme-color" content="#1d4ed8">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Vistoria">
+<meta name="apple-mobile-web-app-title" content="Laudar">
 <!-- bibliotecas guardadas junto do aplicativo, para funcionar sem internet -->
 <script src="lib/jspdf.umd.min.js"></script>
 <style>
@@ -22,6 +22,7 @@ header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px 
 header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .voltar{font-size:22px;line-height:1;text-decoration:none;color:var(--ink);padding:4px 10px 6px;border-radius:8px;border:1px solid var(--line)}
 #status{font-size:13px;color:var(--muted);text-align:right}
+header.sem-topo{display:none}
 a.btn{text-decoration:none}
 /* tela inicial */
 .saudacao{margin:4px 0 16px;color:var(--muted)}
@@ -38,6 +39,10 @@ a.btn{text-decoration:none}
 .tile.tutorial .ico{grid-row:span 2;font-size:30px}
 .tile.largo{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center}
 .tile.largo .ico{grid-row:span 2;font-size:30px}
+/* nome do aplicativo no alto da tela inicial */
+.marca{max-width:640px;text-align:center;margin:6px 0 18px}
+.marca-nome{font-size:44px;font-weight:800;letter-spacing:-1px;line-height:1.05;color:var(--pri)}
+.marca-sub{font-size:16px;font-weight:600;color:var(--muted);letter-spacing:.5px;margin-top:4px}
 /* tela inicial: todos os botões no formato do "Novo laudo" (largura total, ícone à esquerda, mesma altura) */
 .menu{grid-template-columns:1fr;max-width:640px}
 .menu .tile{grid-column:1/-1;min-height:96px;display:grid;grid-template-columns:44px 1fr;column-gap:12px;align-items:center;padding:14px 16px}
@@ -171,7 +176,7 @@ input.uf{text-transform:uppercase;text-align:center}
 <body>
 <header>
   <a id="voltar" class="voltar" href="#/inicio" aria-label="Voltar" hidden>←</a>
-  <h1 id="titulo">Vistoria de Imóveis</h1>
+  <h1 id="titulo">Laudar</h1>
   <span id="status"></span>
 </header>
 <main id="app"></main>
@@ -751,7 +756,7 @@ async function abrirEnvio(v) {
     if (b.dataset.e === 'compartilhar') {
       const t0 = Date.now();
       try {
-        await navigator.share({ files: [compartilhavel], title: 'Laudo para edição', text: `Arquivo do aplicativo Vistoria de Imóveis - ${enderecoCompleto(v)}` });
+        await navigator.share({ files: [compartilhavel], title: 'Laudo para edição', text: `Arquivo do aplicativo Laudar - ${enderecoCompleto(v)}` });
         fechar(); flash('Arquivo enviado ✓', 3000);
       } catch (err) {
         // "cancelado" logo após o toque costuma ser falha do aparelho, e não desistência do usuário
@@ -869,6 +874,8 @@ function topo(titulo, voltarPara) {
   const a = $('#voltar');
   a.hidden = !voltarPara;
   if (voltarPara) a.href = '#/' + voltarPara;
+  // tela inicial: sem título nem botão voltar, a barra do topo some (o nome aparece em destaque na página)
+  document.querySelector('header').classList.toggle('sem-topo', !titulo && !voltarPara);
 }
 // vistoria aberta e deixada sem nenhum dado (ex.: toque acidental em "Nova vistoria")
 const vazia = v => !v.comodos.length && !CAMPOS_TEXTO.some(k => String(v[k] || '').trim()) &&
@@ -901,16 +908,20 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '1.9';
+const VERSAO_APP = '2.0';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
-  topo('Vistoria de Imóveis', null);
+  topo('', null); // na tela inicial o nome aparece em destaque no corpo da página
   const [todas, cfg, ub] = await Promise.all([dbAll(), cfgGet(), cfgLer('ultimoBackup')]);
   // lembrete: com laudos salvos e sem backup há 7 dias ou mais
   const diasBackup = ub ? Math.floor((Date.now() - ub.em) / 86400000) : null;
   const lembrarBackup = todas.length > 0 && (diasBackup === null || diasBackup >= 7);
   app.innerHTML = `
+  <div class="marca">
+    <div class="marca-nome">Laudar</div>
+    <div class="marca-sub">Vistoria de Imóveis</div>
+  </div>
   <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
   ${lembrarBackup ? `<section class="card aviso-backup">
     <div><strong>💾 ${diasBackup === null ? 'Você ainda não fez backup das suas vistorias.' : `Seu último backup foi há ${diasBackup} dias.`}</strong>
@@ -919,7 +930,7 @@ async function telaInicio() {
   </section>` : ''}
   <div class="menu">
     <a class="tile tutorial" href="#/tutorial"><span class="ico">📘</span><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></a>
-    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Prévia, entrega, ressalvas ou avaliação</small></a>
+    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Vistorias, constatações e avaliações</small></a>
     <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
     <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
     <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
@@ -928,7 +939,7 @@ async function telaInicio() {
   <section class="card" id="card-instalar" hidden></section>
   <footer class="rodape">
     © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.<br>
-    Vistoria de Imóveis · versão ${VERSAO_APP}<br>
+    Laudar · Vistoria de Imóveis · versão ${VERSAO_APP}<br>
     Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).<br>
     <a href="#/termos">Termos de Uso e Responsabilidades</a>
   </footer>`;
@@ -966,7 +977,7 @@ async function telaTermos(exigirAceite = false) {
   <article class="card termos">
     <h2>Termos de Uso e Responsabilidades</h2>
     <p class="muted">Versão de ${TERMOS_DATA}.</p>
-    <p class="destaque">Ao utilizar o aplicativo <strong>Vistoria de Imóveis</strong>, você declara ter lido, compreendido e aceitado integralmente estes Termos. Se não concordar com qualquer disposição, não utilize o aplicativo.</p>
+    <p class="destaque">Ao utilizar o aplicativo <strong>Laudar</strong> (Vistoria de Imóveis), você declara ter lido, compreendido e aceitado integralmente estes Termos. Se não concordar com qualquer disposição, não utilize o aplicativo.</p>
 
     <h3>1. Objeto</h3>
     <p>O aplicativo é uma ferramenta de apoio à elaboração de laudos de vistoria de imóveis para locação (inclusive de ressalvas do locatário), de laudos de constatação de problemas em imóveis e de laudos de avaliação de imóveis, disponibilizada <strong>“no estado em que se encontra”</strong>, sem garantias de qualquer natureza, expressas ou implícitas, inclusive de adequação a uma finalidade específica, de funcionamento ininterrupto ou de ausência de erros.</p>

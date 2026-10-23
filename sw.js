@@ -1,11 +1,11 @@
-// Service worker do Vistoria de Imóveis: guarda o aplicativo no aparelho para funcionar sem internet.
+// Service worker do Laudar (Vistoria de Imóveis): guarda o aplicativo no aparelho para funcionar sem internet.
 //
 // - Página (index.html): tenta a internet primeiro, para sempre receber a versão mais nova;
 //   sem conexão, ou com conexão lenta (mais de 4 s), usa a cópia guardada.
 // - Bibliotecas, ícones e manifesto: usa a cópia guardada; só busca na internet se faltar.
 //
 // Ao trocar bibliotecas ou ícones, aumente VERSAO para que os aparelhos baixem os arquivos novos.
-const VERSAO = 'v2';
+const VERSAO = 'v3';
 const CACHE = `vistoria-${VERSAO}`;
 const ARQUIVOS = [
   './',
