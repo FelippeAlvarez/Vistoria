@@ -5,7 +5,7 @@
 // - Bibliotecas, ícones e manifesto: usa a cópia guardada; só busca na internet se faltar.
 //
 // Ao trocar bibliotecas ou ícones, aumente VERSAO para que os aparelhos baixem os arquivos novos.
-const VERSAO = 'v3';
+const VERSAO = 'v4';
 const CACHE = `vistoria-${VERSAO}`;
 const ARQUIVOS = [
   './',
@@ -16,6 +16,9 @@ const ARQUIVOS = [
   'lib/pdf.worker.min.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'icons/icon-maskable-192.png',
+  'icons/icon-maskable-512.png',
+  'icons/simbolo.svg',
   'icons/apple-touch-icon.png',
   'icons/favicon-32.png'
 ];

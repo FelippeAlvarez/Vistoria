@@ -40,9 +40,11 @@ a.btn{text-decoration:none}
 .tile.largo{grid-column:1/-1;min-height:0;display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center}
 .tile.largo .ico{grid-row:span 2;font-size:30px}
 /* nome do aplicativo no alto da tela inicial */
-.marca{max-width:640px;text-align:center;margin:6px 0 18px}
-.marca-nome{font-size:44px;font-weight:800;letter-spacing:-1px;line-height:1.05;color:var(--pri)}
-.marca-sub{font-size:16px;font-weight:600;color:var(--muted);letter-spacing:.5px;margin-top:4px}
+.marca{max-width:640px;display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 20px}
+.marca-simbolo{width:84px;height:84px;flex:none}
+.marca-nome{font-size:46px;font-weight:600;letter-spacing:3px;line-height:1;color:var(--pri)}
+.marca-sub{font-size:13px;font-weight:500;letter-spacing:3.5px;color:var(--muted);margin-top:8px}
+@media (max-width:380px){.marca-simbolo{width:70px;height:70px}.marca-nome{font-size:38px}.marca-sub{font-size:11.5px;letter-spacing:2.5px}}
 /* tela inicial: todos os botões no formato do "Novo laudo" (largura total, ícone à esquerda, mesma altura) */
 .menu{grid-template-columns:1fr;max-width:640px}
 .menu .tile{grid-column:1/-1;min-height:96px;display:grid;grid-template-columns:44px 1fr;column-gap:12px;align-items:center;padding:14px 16px}
@@ -908,7 +910,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '2.0';
+const VERSAO_APP = '2.1';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -919,8 +921,11 @@ async function telaInicio() {
   const lembrarBackup = todas.length > 0 && (diasBackup === null || diasBackup >= 7);
   app.innerHTML = `
   <div class="marca">
-    <div class="marca-nome">Laudar</div>
-    <div class="marca-sub">Vistoria de Imóveis</div>
+    <img class="marca-simbolo" src="icons/simbolo.svg" alt="">
+    <div class="marca-texto">
+      <div class="marca-nome">LAUDAR</div>
+      <div class="marca-sub">VISTORIA DE IMÓVEIS</div>
+    </div>
   </div>
   <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
   ${lembrarBackup ? `<section class="card aviso-backup">

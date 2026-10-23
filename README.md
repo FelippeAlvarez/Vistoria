@@ -58,7 +58,7 @@ Por isso:
 | `manifest.webmanifest` | Nome, ícones e cores usados na instalação. |
 | `sw.js` | Guarda o aplicativo no aparelho para funcionar sem internet. |
 | `lib/` | Bibliotecas de terceiros: [jsPDF](https://github.com/parallax/jsPDF) 2.5.1 (licença MIT), que gera o PDF, e [pdf.js](https://github.com/mozilla/pdf.js) 3.11.174 (licença Apache 2.0), que exibe a prévia. |
-| `icons/` | Ícones do aplicativo. |
+| `icons/` | Ícones do aplicativo e símbolo vetorial (`simbolo.svg`) da marca Laudar. Os arquivos da marca e o gerador ficam em `Laudar-marca`, fora do repositório. |
 
 ## Regra de atualização: os dados do usuário nunca podem ser perdidos
 
