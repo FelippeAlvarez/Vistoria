@@ -70,7 +70,12 @@ a.btn{text-decoration:none}
 .indice{display:flex;flex-wrap:wrap;gap:6px}
 .link-tutorial{font-size:13px;margin:-8px 0 12px;text-align:right}
 /* barra de ações da vistoria */
-.acoes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.acoes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px}
+.sel-fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:10px;max-height:42vh;overflow:auto}
+.sel-foto{position:relative;display:block;font-size:12px;color:var(--muted);cursor:pointer}
+.sel-foto img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block}
+.sel-foto input{position:absolute;top:6px;left:6px;width:20px;height:20px}
+.sel-foto span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acoes .btn{justify-content:center}
 .aviso{background:var(--chip);border-radius:8px;padding:10px 12px;font-size:14px}
 .busca{margin-bottom:8px}
@@ -93,6 +98,7 @@ a.btn{text-decoration:none}
   .menu{gap:10px}
   .tile{padding:14px}
   .acoes{grid-template-columns:1fr 1fr}
+  .acoes .btn:last-child{grid-column:1/-1}
 }
 main{max-width:960px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
@@ -267,9 +273,58 @@ function textoPrazo(v) {
   return `⚠️ O prazo terminou em ${lim}. Verifique o contrato antes de apresentar as ressalvas.`;
 }
 
-// ---------- Data e hora das fotos ----------
-// Lê a data de captura gravada pela câmera (EXIF) antes de a foto ser comprimida;
-// sem EXIF, usa a data do arquivo.
+// ---------- Data, hora e localização das fotos ----------
+// Lê os dados gravados pela câmera (EXIF) antes de a foto ser comprimida, pois a compressão os descarta:
+// data e hora da captura e, quando o aparelho fornecer, a localização GPS (usada na exportação das fotos).
+// Sem data da câmera, usa a data do arquivo (emCamera = false).
+async function lerDadosCamera(file) {
+  const r = { em: '', emCamera: false, gps: null };
+  try {
+    const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (buf.getUint16(0) === 0xFFD8) {
+      for (let o = 2; o + 10 < buf.byteLength;) {
+        const marca = buf.getUint16(o), tam = buf.getUint16(o + 2);
+        if ((marca & 0xFF00) !== 0xFF00) break;
+        if (marca === 0xFFE1 && buf.getUint32(o + 4) === 0x45786966) { // "Exif"
+          const t = o + 10, le = buf.getUint16(t) === 0x4949;
+          const u16 = p => buf.getUint16(t + p, le), u32 = p => buf.getUint32(t + p, le);
+          const procurar = (ifd, tag) => { const n = u16(ifd); for (let i = 0; i < n; i++) { const e = ifd + 2 + i * 12; if (u16(e) === tag) return e; } return -1; };
+          const ifd0 = u32(4), exif = procurar(ifd0, 0x8769);
+          let e = exif >= 0 ? procurar(u32(exif + 8), 0x9003) : -1; // data original da captura
+          if (e < 0) e = procurar(ifd0, 0x0132);                    // data de alteração
+          if (e >= 0) {
+            const ini = t + u32(e + 8);
+            let txt = ''; for (let i = 0; i < 19; i++) txt += String.fromCharCode(buf.getUint8(ini + i));
+            const m = /^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)$/.exec(txt);
+            if (m && m[1] !== '0000') { r.em = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`; r.emCamera = true; }
+          }
+          // localização: bloco GPS (latitude e longitude em graus, minutos e segundos)
+          const g = procurar(ifd0, 0x8825);
+          if (g >= 0) {
+            const gi = u32(g + 8);
+            const letra = tag => { const x = procurar(gi, tag); return x >= 0 ? String.fromCharCode(buf.getUint8(t + x + 8)) : ''; };
+            const graus = tag => {
+              const x = procurar(gi, tag); if (x < 0) return null;
+              const off = u32(x + 8), parte = i => { const d = u32(off + i * 8 + 4); return d ? u32(off + i * 8) / d : 0; };
+              return parte(0) + parte(1) / 60 + parte(2) / 3600;
+            };
+            let lat = graus(2), lon = graus(4);
+            if (lat !== null && lon !== null && (lat || lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+              if (letra(1) === 'S') lat = -lat;
+              if (letra(3) === 'W') lon = -lon;
+              r.gps = { lat: +lat.toFixed(6), lon: +lon.toFixed(6) };
+            }
+          }
+          break;
+        }
+        o += 2 + tam;
+      }
+    }
+  } catch { /* sem EXIF legível */ }
+  if (!r.em && file.lastModified) r.em = new Date(file.lastModified).toISOString();
+  return r;
+}
+// usada antes da v2.3; mantida para compatibilidade
 async function dataDaFoto(file) {
   try {
     const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
@@ -616,7 +671,8 @@ function sanitizar(o) {
     fotos: (Array.isArray(c.fotos) ? c.fotos : [])
       .filter(f => f && typeof f.data === 'string' && IMG_OK.test(f.data)).slice(0, 500)
       .map(f => ({ id: uid(), legenda: TXT(f.legenda, 500), data: f.data, w: Math.max(1, +f.w || 1), h: Math.max(1, +f.h || 1),
-        em: typeof f.em === 'string' && DATA_FOTO_OK.test(f.em) ? f.em : '' }))
+        em: typeof f.em === 'string' && DATA_FOTO_OK.test(f.em) ? f.em : '', emCamera: f.emCamera === true,
+        gps: f.gps && isFinite(f.gps.lat) && isFinite(f.gps.lon) && Math.abs(f.gps.lat) <= 90 && Math.abs(f.gps.lon) <= 180 ? { lat: +f.gps.lat, lon: +f.gps.lon } : null }))
   }));
   return v;
 }
@@ -769,6 +825,240 @@ async function abrirEnvio(v) {
   });
 }
 
+// ---------- Exportação das fotos do laudo ----------
+// Exporta a versão otimizada (a mesma usada no laudo). Quando a câmera forneceu, a data da captura e a
+// localização GPS são gravadas de volta no arquivo JPEG, para conferência de quando e onde a foto foi tirada.
+function blocoExif(f) {
+  const data = f.emCamera && DATA_FOTO_OK.test(f.em || '') ? f.em.slice(0, 19).replace(/-/g, ':').replace('T', ' ') : '';
+  const gps = f.gps && isFinite(f.gps.lat) && isFinite(f.gps.lon) ? f.gps : null;
+  if (!data && !gps) return null;
+  const n0 = (data ? 1 : 0) + (gps ? 1 : 0), tamIfd = n => 2 + n * 12 + 4;
+  let p = 8 + tamIfd(n0);
+  const ifdExif = p; if (data) p += tamIfd(1);
+  const ifdGps = p; if (gps) p += tamIfd(5);
+  const pData = p; if (data) p += 20;
+  const pLat = p, pLon = p + 24; if (gps) p += 48;
+  const b = new DataView(new ArrayBuffer(p));
+  b.setUint16(0, 0x4949); b.setUint16(2, 42, true); b.setUint32(4, 8, true); // cabeçalho TIFF "II"
+  let o = 8;
+  const entrada = (tag, tipo, qtd, valor) => { b.setUint16(o, tag, true); b.setUint16(o + 2, tipo, true); b.setUint32(o + 4, qtd, true); b.setUint32(o + 8, valor, true); o += 12; };
+  b.setUint16(o, n0, true); o += 2;
+  if (data) entrada(0x8769, 4, 1, ifdExif);
+  if (gps) entrada(0x8825, 4, 1, ifdGps);
+  b.setUint32(o, 0, true);
+  if (data) {
+    o = ifdExif; b.setUint16(o, 1, true); o += 2;
+    entrada(0x9003, 2, 20, pData); b.setUint32(o, 0, true);
+    for (let i = 0; i < 19; i++) b.setUint8(pData + i, data.charCodeAt(i));
+  }
+  if (gps) {
+    o = ifdGps; b.setUint16(o, 5, true); o += 2;
+    entrada(0x0000, 1, 4, 0x00000302);                                // versão 2.3.0.0
+    entrada(0x0001, 2, 2, (gps.lat < 0 ? 'S' : 'N').charCodeAt(0));
+    entrada(0x0002, 5, 3, pLat);
+    entrada(0x0003, 2, 2, (gps.lon < 0 ? 'W' : 'E').charCodeAt(0));
+    entrada(0x0004, 5, 3, pLon);
+    b.setUint32(o, 0, true);
+    const gms = (pos, v) => {
+      v = Math.abs(v);
+      const g = Math.floor(v), mf = (v - g) * 60, m = Math.floor(mf), s = Math.round((mf - m) * 600000);
+      [[g, 1], [m, 1], [s, 10000]].forEach(([n, d], i) => { b.setUint32(pos + i * 8, n, true); b.setUint32(pos + i * 8 + 4, d, true); });
+    };
+    gms(pLat, gps.lat); gms(pLon, gps.lon);
+  }
+  const tiff = new Uint8Array(b.buffer), app1 = new Uint8Array(10 + tiff.length);
+  const a = new DataView(app1.buffer);
+  a.setUint16(0, 0xFFE1); a.setUint16(2, 8 + tiff.length);
+  app1.set([0x45, 0x78, 0x69, 0x66, 0, 0], 4); app1.set(tiff, 10);
+  return app1;
+}
+// insere o bloco EXIF logo após o início do JPEG (e após o bloco JFIF, se houver)
+function inserirExif(jpg, app1) {
+  let pos = 2;
+  if (jpg[2] === 0xFF && jpg[3] === 0xE0) pos = 4 + ((jpg[4] << 8) | jpg[5]);
+  const r = new Uint8Array(jpg.length + app1.length);
+  r.set(jpg.subarray(0, pos)); r.set(app1, pos); r.set(jpg.subarray(pos), pos + app1.length);
+  return r;
+}
+const bytesDeDataUrl = url => { const bin = atob(url.slice(url.indexOf(',') + 1)); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+const imagemDe = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+const canvasParaBytes = cv => new Promise(res => cv.toBlob(async b => res(new Uint8Array(await b.arrayBuffer())), 'image/jpeg', 0.92));
+
+// Desenha a foto e, se pedido, uma faixa com o cômodo e o endereço na parte de baixo.
+async function jpegDaFoto(f, carimbo) {
+  if (!carimbo && /^data:image\/jpeg/.test(f.data)) return bytesDeDataUrl(f.data);
+  const img = await imagemDe(f.data);
+  const cv = document.createElement('canvas'); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const g = cv.getContext('2d');
+  g.drawImage(img, 0, 0);
+  if (carimbo) {
+    const w = cv.width, h = cv.height, faixa = Math.round(Math.max(56, h * 0.12)), m = Math.round(faixa * 0.3);
+    const f1 = Math.round(faixa * 0.34), f2 = Math.round(faixa * 0.25);
+    const caber = (txt, larg) => { if (g.measureText(txt).width <= larg) return txt; while (txt.length > 3 && g.measureText(txt + '…').width > larg) txt = txt.slice(0, -1); return txt + '…'; };
+    g.fillStyle = 'rgba(0,0,0,0.62)'; g.fillRect(0, h - faixa, w, faixa);
+    g.fillStyle = '#ffffff'; g.textBaseline = 'alphabetic';
+    g.font = `600 ${f1}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    g.fillText(caber(carimbo.comodo, w - 2 * m), m, h - faixa + Math.round(faixa * 0.42));
+    g.font = `${f2}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    g.fillText(caber(carimbo.endereco, w - 2 * m), m, h - faixa + Math.round(faixa * 0.78));
+  }
+  return canvasParaBytes(cv);
+}
+const nn = i => String(i + 1).padStart(2, '0');
+const nomeFoto = (c, ci, f, fi) => `${nn(ci)}-${slug(c.nome) || 'Comodo'}-foto-${nn(fi)}` +
+  (f.legenda ? '-' + slug(f.legenda).toLowerCase().slice(0, 40).replace(/-+$/, '') : '') + '.jpg';
+async function arquivosDasFotos(v, escolhidas, carimbar) {
+  const endereco = [enderecoCompleto(v), cidadeUF(v)].filter(Boolean).join(' - ');
+  const lista = [];
+  for (const [ci, fi] of escolhidas) {
+    const c = v.comodos[ci], f = c.fotos[fi];
+    let bytes = await jpegDaFoto(f, carimbar ? { comodo: c.nome || 'Cômodo', endereco: endereco || 'Endereço não informado' } : null);
+    const app1 = blocoExif(f);
+    if (app1) bytes = inserirExif(bytes, app1);
+    lista.push({ nome: nomeFoto(c, ci, f, fi), bytes });
+  }
+  return lista;
+}
+
+// .zip sem compressão (as fotos JPEG já são comprimidas); nomes em UTF-8
+const TAB_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = u => { let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = TAB_CRC[(c ^ u[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function montarZip(arquivos) {
+  const enc = new TextEncoder(), partes = [], central = [];
+  const d = new Date(), hora = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dia = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  let pos = 0;
+  for (const a of arquivos) {
+    const nome = enc.encode(a.nome), crc = crc32(a.bytes), n = a.bytes.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, hora, 2], [12, dia, 2], [14, crc, 4], [18, n, 4], [22, n, 4], [26, nome.length, 2], [28, 0, 2]]
+      .forEach(([o, v, t]) => t === 4 ? lh.setUint32(o, v, true) : lh.setUint16(o, v, true));
+    partes.push(new Uint8Array(lh.buffer), nome, a.bytes);
+    const ch = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, hora, 2], [14, dia, 2], [16, crc, 4], [20, n, 4], [24, n, 4],
+      [28, nome.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, pos, 4]]
+      .forEach(([o, v, t]) => t === 4 ? ch.setUint32(o, v, true) : ch.setUint16(o, v, true));
+    central.push(new Uint8Array(ch.buffer), nome);
+    pos += 30 + nome.length + n;
+  }
+  const tamCentral = central.reduce((s, p) => s + p.length, 0);
+  const fim = new DataView(new ArrayBuffer(22));
+  fim.setUint32(0, 0x06054b50, true); fim.setUint16(8, arquivos.length, true); fim.setUint16(10, arquivos.length, true);
+  fim.setUint32(12, tamCentral, true); fim.setUint32(16, pos, true);
+  return new Blob([...partes, ...central, new Uint8Array(fim.buffer)], { type: 'application/zip' });
+}
+
+// Janela "Fotos": 1) escolher fotos e opções; 2) preparar; 3) compartilhar, baixar .zip ou salvar na pasta.
+// O preparo vem antes do toque em "Compartilhar", que precisa ser um gesto novo do usuário nos celulares.
+async function abrirFotos(v) {
+  const todas = [];
+  v.comodos.forEach((c, ci) => c.fotos.forEach((f, fi) => todas.push([ci, fi])));
+  if (!todas.length) { alert('Este laudo ainda não tem fotos.'); return; }
+  const pastaPdf = suportaPastas ? await pasta('pastaPDF') : null;
+  const ov = document.createElement('div');
+  ov.className = 'modal';
+  document.body.appendChild(ov);
+  const caixa = document.createElement('div'); caixa.className = 'modal-caixa'; ov.appendChild(caixa);
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = e => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  let escopo = 'todas', marcadas = new Set(todas.map(x => x.join('.'))), carimbar = false, prontos = null;
+  const escolhidas = () => escopo === 'todas' ? todas : escopo === 'escolher'
+    ? todas.filter(x => marcadas.has(x.join('.'))) : todas.filter(x => x[0] === +escopo);
+  const msg = t => { const m = caixa.querySelector('#fotos-msg'); m.hidden = !t; m.textContent = t || ''; };
+
+  const etapaEscolha = () => {
+    prontos = null;
+    const n = escolhidas().length;
+    caixa.innerHTML = `
+      <h2>🖼️ Fotos do laudo</h2>
+      <p class="muted" style="margin-top:0">Versão otimizada (até 1600 px), em JPEG. A data e a localização gravadas pela câmera são mantidas no arquivo quando estiverem disponíveis.</p>
+      <label>Quais fotos<select id="fotos-escopo">
+        <option value="todas" ${escopo === 'todas' ? 'selected' : ''}>Todas as fotos (${todas.length})</option>
+        ${v.comodos.map((c, ci) => c.fotos.length ? `<option value="${ci}" ${escopo === String(ci) ? 'selected' : ''}>${esc(c.nome || 'Cômodo')} (${c.fotos.length})</option>` : '').join('')}
+        <option value="escolher" ${escopo === 'escolher' ? 'selected' : ''}>Escolher as fotos…</option>
+      </select></label>
+      ${escopo === 'escolher' ? `<div class="sel-fotos">${todas.map(([ci, fi]) => {
+        const k = ci + '.' + fi;
+        return `<label class="sel-foto"><img src="${v.comodos[ci].fotos[fi].data}" alt=""><input type="checkbox" data-k="${k}" ${marcadas.has(k) ? 'checked' : ''}><span>${esc(v.comodos[ci].nome)} ${fi + 1}</span></label>`;
+      }).join('')}</div>` : ''}
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="fotos-carimbo" ${carimbar ? 'checked' : ''}>
+        <span>Carimbar na foto o cômodo e o endereço do imóvel</span></label>
+      <p class="aviso" id="fotos-msg" hidden></p>
+      <div class="modal-botoes">
+        <button class="btn primary" data-e="preparar" ${n ? '' : 'disabled'}>Preparar ${n} foto${n === 1 ? '' : 's'}</button>
+        <button class="btn" data-e="fechar">Fechar</button>
+      </div>`;
+  };
+  const etapaAcoes = () => {
+    const total = prontos.reduce((s, a) => s + a.bytes.length, 0);
+    const tam = total < 1048576 ? Math.max(1, Math.round(total / 1024)) + ' KB' : (total / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' MB';
+    const arquivos = prontos.map(a => new File([a.bytes], a.nome, { type: 'image/jpeg' }));
+    let podeCompartilhar = false;
+    try { podeCompartilhar = !!(navigator.canShare && navigator.canShare({ files: arquivos })); } catch { /* não suportado */ }
+    caixa.innerHTML = `
+      <h2>🖼️ ${prontos.length} foto${prontos.length === 1 ? '' : 's'} pronta${prontos.length === 1 ? '' : 's'}</h2>
+      <p class="muted" style="margin-top:0">Total de ${tam}.${podeCompartilhar ? ' Pelo WhatsApp, envie como <strong>documento</strong> para não perder qualidade.' : ''}</p>
+      <p class="aviso" id="fotos-msg" hidden></p>
+      <div class="modal-botoes">
+        ${podeCompartilhar ? '<button class="btn primary" data-e="compartilhar">📤 Compartilhar as fotos</button>' : ''}
+        <button class="btn${podeCompartilhar ? '' : ' primary'}" data-e="zip">💾 Baixar em um arquivo .zip</button>
+        ${pastaPdf ? `<button class="btn" data-e="pasta">📁 Salvar na pasta "${esc(pastaPdf.name)}"</button>` : ''}
+        <button class="btn" data-e="voltar">← Voltar</button>
+        <button class="btn" data-e="fechar">Fechar</button>
+      </div>`;
+    if (!podeCompartilhar && navigator.canShare) msg('Este aparelho não consegue compartilhar essa quantidade de fotos de uma vez. Use o arquivo .zip ou escolha menos fotos.');
+    caixa._arquivos = arquivos;
+  };
+  const nomeBase = nomePDF(v).replace(/\.pdf$/, '') + '-fotos';
+
+  caixa.addEventListener('change', e => {
+    const t = e.target;
+    if (t.id === 'fotos-escopo') { escopo = t.value; etapaEscolha(); }
+    else if (t.id === 'fotos-carimbo') carimbar = t.checked;
+    else if (t.dataset.k) {
+      t.checked ? marcadas.add(t.dataset.k) : marcadas.delete(t.dataset.k);
+      const n = escolhidas().length, bt = caixa.querySelector('[data-e="preparar"]');
+      bt.disabled = !n; bt.textContent = `Preparar ${n} foto${n === 1 ? '' : 's'}`;
+    }
+  });
+  caixa.addEventListener('click', async e => {
+    const b = e.target.closest('[data-e]'); if (!b) return;
+    const acao = b.dataset.e;
+    if (acao === 'fechar') return fechar();
+    if (acao === 'voltar') return etapaEscolha();
+    if (acao === 'preparar') {
+      b.disabled = true; b.textContent = 'Preparando…';
+      try { prontos = await arquivosDasFotos(v, escolhidas(), carimbar); etapaAcoes(); }
+      catch (err) { b.disabled = false; b.textContent = 'Tentar de novo'; msg('Não foi possível preparar as fotos (' + err.message + ').'); }
+      return;
+    }
+    if (acao === 'zip') {
+      baixar(montarZip(prontos), nomeBase + '.zip');
+      return msg(`Arquivo "${nomeBase}.zip" salvo no aparelho (normalmente na pasta Downloads).`);
+    }
+    if (acao === 'pasta') {
+      try {
+        if (!(await permitir(pastaPdf))) return msg('Sem permissão para gravar na pasta escolhida.');
+        const sub = await pastaPdf.getDirectoryHandle(nomeBase, { create: true });
+        for (const a of prontos) await gravarNaPasta(sub, a.nome, new Blob([a.bytes], { type: 'image/jpeg' }));
+        return msg(`${prontos.length} foto(s) salvas na pasta "${pastaPdf.name}/${nomeBase}".`);
+      } catch (err) { return msg('Não foi possível gravar na pasta (' + err.message + '). Use o arquivo .zip.'); }
+    }
+    if (acao === 'compartilhar') {
+      const t0 = Date.now();
+      try {
+        await navigator.share({ files: caixa._arquivos, title: 'Fotos do laudo', text: `Fotos do laudo - ${enderecoCompleto(v)}` });
+        fechar(); flash('Fotos enviadas ✓', 3000);
+      } catch (err) {
+        if (err.name === 'AbortError' && Date.now() - t0 > 1500) return; // a pessoa cancelou
+        msg(`Este aparelho não conseguiu abrir o compartilhamento${err.message ? ` (${err.message})` : ''}. Use o arquivo .zip.`);
+      }
+    }
+  });
+  etapaEscolha();
+}
+
 // ---------- Ditado por voz ----------
 // Usa o reconhecimento de voz do navegador: Google (Chrome, Edge, Android) ou Apple (Safari, iPhone).
 // O áudio é processado pelo serviço do navegador e só funciona com internet; o aplicativo não grava áudio.
@@ -910,7 +1200,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '2.2';
+const VERSAO_APP = '2.3';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 async function telaInicio() {
@@ -1080,6 +1370,7 @@ function telaTutorial(secao) {
     <li>Em cada cômodo, informe o estado geral, escreva a descrição (ou use <strong>🎤 Ditar</strong>) e tire as fotos com <strong>📷 Tirar foto</strong>. Dê uma legenda a cada foto.</li>
     <li>Se quiser, marque <strong>“Imprimir no PDF a data e a hora de cada foto”</strong>: isso reforça o valor de prova das fotos.</li>
     <li>Revise tudo em <strong>👁️ Visualizar</strong>. Depois use <strong>⬇️ Salvar PDF</strong> ou <strong>📤 Compartilhar PDF</strong>.</li>
+    <li>Para mandar só as imagens, use <strong>🖼️ Fotos</strong>: escolha todas, as de um cômodo ou algumas, e, se quiser, carimbe em cada uma o cômodo e o endereço. Os arquivos levam a data e a localização gravadas pela câmera, quando o celular as fornece. Pelo WhatsApp, envie como <strong>documento</strong> para não perder a qualidade.</li>
     <li>Imprima ou envie o PDF para assinatura. As partes assinam ao final e rubricam todas as páginas.</li>
     <li>Para outra pessoa continuar o trabalho, use <strong>📨 Enviar p/ edição</strong>: o aplicativo gera um <strong>arquivo do laudo</strong> (não é o PDF), que a outra pessoa abre em <strong>Laudos de outras pessoas → Importar arquivo</strong>. O arquivo leva o seu cabeçalho, e quem recebe escolhe se o mantém.</li>
     <li>Faça o <strong>💾 Backup de todas</strong> com frequência e guarde o arquivo fora do celular: as vistorias e o cadastro ficam só neste aparelho. O aplicativo lembra você na tela inicial quando o último backup tiver mais de 7 dias.</li>
@@ -1334,6 +1625,7 @@ function telaEditor() {
     <button class="btn" data-act="compartilhar">📤 Compartilhar PDF</button>
     <button class="btn primary" data-act="pdf">⬇️ Salvar PDF</button>
     <button class="btn" data-act="enviar" data-id="${v.id}">📨 Enviar p/ edição</button>
+    <button class="btn" data-act="fotos" data-id="${v.id}">🖼️ Fotos</button>
   </div>
   ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
   ${v.cabecalhoRecebido ? `<div class="aviso row between">
@@ -1766,9 +2058,9 @@ app.addEventListener('change', async e => {
   for (let i = 0; i < files.length; i++) {
     p.textContent = `Processando foto ${i + 1} de ${files.length}…`;
     try {
-      const em = await dataDaFoto(files[i]); // antes de comprimir: a compressão descarta os dados da câmera
+      const cam = await lerDadosCamera(files[i]); // antes de comprimir: a compressão descarta os dados da câmera
       const r = await comprimir(files[i]);
-      c.fotos.push({ id: uid(), legenda: '', em, ...r });
+      c.fotos.push({ id: uid(), legenda: '', em: cam.em, emCamera: cam.emCamera, gps: cam.gps, ...r });
     } catch { alert('Não foi possível ler o arquivo ' + files[i].name); }
   }
   await flush();
@@ -1807,6 +2099,10 @@ app.addEventListener('click', async e => {
     case 'excluir':
       if (confirm('Excluir esta vistoria definitivamente? (faça um backup antes, se necessário)')) { await dbDel(d.id); telaVistorias(); }
       break;
+    case 'fotos': {
+      if (cur) await flush();
+      await abrirFotos(cur && cur.id === d.id ? cur : migrar(await dbGet(d.id))); break;
+    }
     case 'enviar': {
       if (cur) await flush();
       const v = cur && cur.id === d.id ? cur : migrar(await dbGet(d.id));

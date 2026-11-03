@@ -36,6 +36,7 @@ Depois de instalado, o aplicativo abre com ícone próprio, em janela própria, 
 - **Declaração final editável** em cada vistoria, a partir de um texto padrão.
 - **Cabeçalho personalizado** com logo, nome e contato de quem elabora a vistoria.
 - **Laudo em PDF** com textos justificados, fotos numeradas, rubrica e numeração em todas as páginas e espaço para assinaturas. É possível **visualizar**, **salvar** e **compartilhar** (WhatsApp, e-mail etc.) o PDF.
+- **Fotos do laudo em arquivos de imagem** (botão 🖼️ Fotos): todas, as de um cômodo ou escolhidas uma a uma, na versão otimizada usada no laudo, com nomes como `01-Sala-foto-01-parede-com-fissura.jpg`. Opcionalmente carimba em cada foto o cômodo e o endereço. Mantém no arquivo a data e a localização (GPS) gravadas pela câmera, quando disponíveis. Compartilhar (WhatsApp, e-mail etc.), baixar num arquivo .zip ou salvar numa pasta (computador).
 - **Pasta para salvar os PDFs** (no computador, com Chrome ou Edge). No celular, os PDFs vão para Downloads ou para onde você escolher ao compartilhar.
 - **Troca de laudos entre pessoas:** o botão **Enviar p/ edição** gera um arquivo do laudo (com fotos) que outra pessoa abre no aplicativo em **Laudos de outras pessoas** e continua editando. No computador, é possível usar uma **pasta compartilhada** (Google Drive, OneDrive ou Dropbox sincronizados): o aplicativo lista os laudos que estão nela e importa com um clique.
 - **Backup** de todas as vistorias num único arquivo, que pode ser importado em outro aparelho.
