@@ -22,17 +22,26 @@
 <meta name="twitter:description" content="Laudar: laudos de vistoria de imóveis (prévia, entrega, ressalvas do locatário, constatação de problema e avaliação), com fotos por cômodo e PDF.">
 <meta name="twitter:image" content="https://felippealvarez.github.io/Vistoria/og-image.png">
 <link rel="manifest" href="manifest.webmanifest">
+<script>try { const t = localStorage.getItem('laudar-tema'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch { /* sem armazenamento: tema automático */ }</script>
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Laudar">
 <!-- bibliotecas guardadas junto do aplicativo, para funcionar sem internet -->
 <script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/georegistro.js"></script>
 <style>
-:root{--bg:#f4f6f9;--card:#fff;--ink:#1e293b;--muted:#64748b;--line:#dbe2ea;--pri:#1d4ed8;--danger:#b91c1c;--chip:#eef2f7}
-@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18202b;--ink:#e2e8f0;--muted:#94a3b8;--line:#2b3746;--pri:#3b82f6;--danger:#f87171;--chip:#223043}}
+:root{--bg:#f3f5f9;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--pri:#1d4ed8;--pri-2:#1e3a8a;--pri-soft:#e8efff;--danger:#b91c1c;--chip:#eef2f7;
+  --ok:#15803d;--alerta:#b45309;--sombra:0 1px 2px rgba(15,23,42,.05),0 6px 18px rgba(15,23,42,.06);color-scheme:light}
+/* tema escuro: automático (segue o aparelho) ou escolhido em Configurações → Aparência */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0b1118;--card:#141c27;--ink:#e5ebf3;--muted:#93a1b5;--line:#243142;--pri:#3b82f6;--pri-2:#1e3a8a;--pri-soft:#172554;--danger:#f87171;--chip:#1c2836;--ok:#4ade80;--alerta:#fbbf24;--sombra:0 1px 2px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme=dark]{--bg:#0b1118;--card:#141c27;--ink:#e5ebf3;--muted:#93a1b5;--line:#243142;--pri:#3b82f6;--pri-2:#1e3a8a;--pri-soft:#172554;--danger:#f87171;--chip:#1c2836;--ok:#4ade80;--alerta:#fbbf24;--sombra:0 1px 2px rgba(0,0,0,.35);color-scheme:dark}
+/* fonte Inter (licença SIL OFL 1.1), guardada no aplicativo para funcionar sem internet */
+@font-face{font-family:"Inter";src:url(lib/fontes/inter-latin.woff2) format("woff2");font-weight:100 900;font-style:normal;font-display:swap}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.ic{width:1.2em;height:1.2em;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.22em}
 header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top));display:flex;gap:10px;align-items:center;min-height:52px}
 header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .voltar{font-size:22px;line-height:1;text-decoration:none;color:var(--ink);padding:4px 10px 6px;border-radius:8px;border:1px solid var(--line)}
@@ -66,7 +75,8 @@ a.btn{text-decoration:none}
 .menu .tile .ico{grid-row:span 2;font-size:30px;text-align:center}
 /* escolha do tipo de laudo */
 .tipos{display:grid;grid-template-columns:1fr;gap:6px;max-width:640px}
-.tile.tipo{min-height:0;width:100%}
+.tile.tipo{min-height:0;width:100%;display:grid;grid-template-columns:44px 1fr;column-gap:14px;align-items:center;box-shadow:var(--sombra);border-radius:16px}
+.tile.tipo .bolha{grid-row:span 2;width:44px;height:44px}
 .link-tipo{font-size:13px;margin:0 0 10px 4px}
 /* lembrete de backup */
 .aviso-backup{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-color:#d97706;background:color-mix(in srgb,#f59e0b 10%,var(--card))}
@@ -193,8 +203,135 @@ input.uf{text-transform:uppercase;text-align:center}
   .g-partes{grid-template-columns:1fr}
   .g-partes span{display:none}
 }
+/* registro de local e hora */
+.geo-reg{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:14px;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;background:var(--bg)}
+.geo-mapa{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+.geo-mapa.grande{margin-bottom:10px}
+.geo-sem-mapa{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;background:var(--chip)}
+.geo-info dl,.geo-dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:8px 0 10px;font-size:13px}
+.geo-info dt,.geo-dl dt{color:var(--muted)}
+.geo-info dd,.geo-dl dd{margin:0;overflow-wrap:anywhere}
+.ok{color:var(--ok)}.alerta{color:var(--alerta)}
+.foto-local{position:absolute;left:6px;top:112px;background:rgba(0,0,0,.62);color:#fff;font-size:11px;padding:2px 6px;border-radius:6px}
+@media (max-width:600px){.geo-reg{grid-template-columns:1fr}}
 .logo-box{width:160px;height:90px;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden}
 .logo-box img{max-width:100%;max-height:100%;object-fit:contain}
+
+/* ===== Visual 3.0: superfícies, botões e cabeçalho ===== */
+.card{border:1px solid var(--line);border-radius:16px;box-shadow:var(--sombra);padding:18px}
+h2{font-size:17px;font-weight:650;letter-spacing:-.01em}
+h3{font-weight:650}
+.btn{border-radius:10px;font-weight:500;transition:background .15s,border-color .15s,transform .05s}
+.btn:active{transform:scale(.98)}
+.btn:hover{border-color:color-mix(in srgb,var(--pri) 45%,var(--line))}
+.btn.primary{background:var(--pri);box-shadow:0 1px 2px rgba(29,78,216,.25)}
+.btn.primary:hover{background:color-mix(in srgb,var(--pri) 88%,#000)}
+input,select,textarea{border-radius:10px;background:var(--card)}
+input:focus,select:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--pri) 40%,transparent);outline-offset:0;border-color:var(--pri)}
+header{background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(1.4) blur(8px);-webkit-backdrop-filter:saturate(1.4) blur(8px);box-shadow:0 1px 0 var(--line)}
+header h1{font-weight:650;letter-spacing:-.01em}
+.voltar{display:flex;align-items:center;justify-content:center;width:38px;height:38px;padding:0;border-radius:10px;font-size:20px}
+.aviso{border:1px solid var(--line)}
+/* cores por tipo de laudo */
+.cor-azul{--c:#1d4ed8;--cs:#dbeafe}.cor-verde{--c:#15803d;--cs:#dcfce7}.cor-roxo{--c:#7c3aed;--cs:#ede9fe}.cor-laranja{--c:#c2410c;--cs:#ffedd5}.cor-teal{--c:#0f766e;--cs:#ccfbf1}.cor-cinza{--c:#475569;--cs:#e2e8f0}.cor-ambar{--c:#b45309;--cs:#fef3c7}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) :is(.cor-azul,.cor-verde,.cor-roxo,.cor-laranja,.cor-teal,.cor-cinza,.cor-ambar){--cs:color-mix(in srgb,var(--c) 22%,#141c27)}
+  :root:not([data-theme=light]) .cor-azul{--c:#60a5fa}:root:not([data-theme=light]) .cor-verde{--c:#4ade80}:root:not([data-theme=light]) .cor-roxo{--c:#a78bfa}:root:not([data-theme=light]) .cor-laranja{--c:#fb923c}:root:not([data-theme=light]) .cor-teal{--c:#2dd4bf}:root:not([data-theme=light]) .cor-cinza{--c:#94a3b8}:root:not([data-theme=light]) .cor-ambar{--c:#fbbf24}}
+:root[data-theme=dark] :is(.cor-azul,.cor-verde,.cor-roxo,.cor-laranja,.cor-teal,.cor-cinza,.cor-ambar){--cs:color-mix(in srgb,var(--c) 22%,#141c27)}
+:root[data-theme=dark] .cor-azul{--c:#60a5fa}:root[data-theme=dark] .cor-verde{--c:#4ade80}:root[data-theme=dark] .cor-roxo{--c:#a78bfa}:root[data-theme=dark] .cor-laranja{--c:#fb923c}:root[data-theme=dark] .cor-teal{--c:#2dd4bf}:root[data-theme=dark] .cor-cinza{--c:#94a3b8}:root[data-theme=dark] .cor-ambar{--c:#fbbf24}
+.bolha{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--cs);color:var(--c);flex:none;font-size:19px}
+.etiqueta{display:inline-block;font-size:11.5px;font-weight:600;border-radius:6px;padding:2px 7px;background:var(--cs);color:var(--c)}
+
+/* ===== tela inicial ===== */
+.hero{margin:-16px -16px 0;padding:22px 20px 46px;padding-top:max(22px,calc(env(safe-area-inset-top) + 14px));background:#1d4ed8;color:#fff;border-radius:0 0 22px 22px}
+.hero-topo{display:flex;align-items:center;gap:12px}
+.hero-logo{width:46px;height:46px;border-radius:13px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.hero-logo img{width:36px;height:36px}
+.hero-nome{font-size:24px;font-weight:700;letter-spacing:3px;line-height:1}
+.hero-sub{font-size:10.5px;letter-spacing:2.6px;opacity:.82;margin-top:5px;font-weight:500}
+.hero-ola{font-size:19px;font-weight:600;margin:22px 0 2px;letter-spacing:-.01em}
+.hero-resumo{margin:0;opacity:.85;font-size:14px}
+.home{max-width:680px;margin:-30px auto 0;position:relative;display:flex;flex-direction:column;gap:12px}
+.acao-principal{display:flex;align-items:center;gap:14px;background:var(--card);border-radius:16px;padding:16px;box-shadow:0 6px 24px rgba(15,23,42,.14);text-decoration:none;color:var(--ink);border:1px solid var(--line)}
+.acao-principal .bolha{background:var(--pri);color:#fff;width:46px;height:46px;font-size:22px}
+.acao-principal strong{font-size:16px;display:block}
+.acao-principal small,.atalho small,.tile-tut small{color:var(--muted);font-size:13px}
+.acao-principal>.ic,.tile-tut>.ic{margin-left:auto;color:var(--muted)}
+.atalhos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.atalho{display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;text-decoration:none;color:var(--ink);box-shadow:var(--sombra);min-height:116px}
+.atalho strong{font-size:14.5px;line-height:1.25}
+.atalho:hover,.acao-principal:hover,.tile-tut:hover,.laudo:hover{border-color:color-mix(in srgb,var(--pri) 45%,var(--line))}
+.tile-tut{display:flex;align-items:center;gap:12px;background:var(--pri-soft);border:1px solid color-mix(in srgb,var(--pri) 25%,var(--line));border-radius:16px;padding:14px;text-decoration:none;color:var(--ink)}
+.tile-tut strong{display:block}
+.sec-tit{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:10px 2px 0}
+.progresso{height:5px;border-radius:9px;background:var(--chip);overflow:hidden;margin-top:6px}
+.progresso i{display:block;height:100%;background:var(--pri);border-radius:9px}
+
+
+/* ===== lista de laudos em cartões ===== */
+.filtros{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
+.filtros .chip.on{background:var(--pri);border-color:var(--pri);color:#fff}
+.busca-box{position:relative;margin-bottom:10px}
+.busca-box .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.busca-box input{padding-left:38px}
+.laudos{display:flex;flex-direction:column;gap:10px}
+.laudo{display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:var(--sombra)}
+.laudo-capa{width:64px;height:64px;border-radius:12px;object-fit:cover;display:flex;align-items:center;justify-content:center;background:var(--cs);color:var(--c);font-size:26px;text-decoration:none}
+.laudo-tit{display:block;font-weight:600;margin:3px 0 1px;color:var(--ink);text-decoration:none;overflow-wrap:anywhere}
+.laudo-meta{font-size:13px;color:var(--muted)}
+.laudo-acoes{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}
+.laudo-acoes .btn{padding:6px 11px;font-size:13px}
+.laudo-acoes details{position:relative}
+.laudo-acoes summary{list-style:none}
+.laudo-acoes summary::-webkit-details-marker{display:none}
+.menu-mais{position:absolute;z-index:8;right:0;top:calc(100% + 6px);background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:6px;display:flex;flex-direction:column;min-width:210px}
+.menu-mais .btn{border:0;justify-content:flex-start;box-shadow:none;background:transparent}
+.menu-mais .btn:hover{background:var(--chip)}
+.laudo-acoes details:last-child .menu-mais{right:0}
+.vazio{text-align:center;padding:28px 12px}
+.vazio .bolha{margin:0 auto 10px;width:56px;height:56px;font-size:26px}
+
+/* ===== editor: etapas, ações e cômodos ===== */
+.etapas{position:sticky;top:52px;z-index:4;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);margin:-16px -16px 12px;padding:10px 16px 8px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.etapa{font:inherit;background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--muted);font-size:12px;font-weight:500}
+.etapa i{display:block;height:5px;border-radius:9px;background:var(--line);margin-bottom:5px}
+.etapa.ok{color:var(--ink)}.etapa.ok i{background:var(--pri)}
+.etapa.parcial i{background:linear-gradient(90deg,var(--pri) 50%,var(--line) 50%)}
+.acoes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.acoes .btn{flex:1 1 auto;justify-content:center;padding:10px 12px}
+.acoes .btn span.rot-curto{display:none}
+.tabs{border-bottom:0;gap:8px;padding-bottom:4px}
+.tab{border-radius:999px;padding:7px 13px;background:var(--card);display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.tab .badge{opacity:1;background:var(--chip);color:var(--muted);border-radius:999px;padding:0 7px;font-size:11.5px;font-weight:600}
+.tab.on .badge{background:rgba(255,255,255,.22);color:#fff}
+.estados{display:flex;gap:6px;flex-wrap:wrap}
+.estado{font:inherit;font-size:13.5px;font-weight:500;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 13px;cursor:pointer}
+.estado.on{background:var(--cs);color:var(--c);border-color:var(--c)}
+#sec-dados,#sec-comodos,#sec-textos,.parte{scroll-margin-top:120px}
+.rot-campo{font-size:13px;color:var(--muted);margin-bottom:6px}
+.fotos{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+figure{border-radius:12px;background:var(--card)}
+.foto-data{top:auto;bottom:calc(100% - 134px)}
+.foto-local{top:auto;bottom:calc(100% - 110px)}
+.foto-n{position:absolute;left:6px;top:6px;background:var(--pri);color:#fff;font-size:11px;font-weight:600;border-radius:6px;padding:2px 6px}
+.add-foto{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:178px;border:1.5px dashed color-mix(in srgb,var(--pri) 45%,var(--line));border-radius:12px;color:var(--pri);font-weight:600;font-size:13.5px;cursor:pointer;background:var(--pri-soft);text-align:center;padding:8px}
+.add-foto .ic{width:28px;height:28px}
+.add-foto.sec{background:var(--card);color:var(--muted);border-color:var(--line)}
+@media (max-width:600px){
+
+  /* ações do laudo viram uma barra fixa no rodapé, com o PDF em destaque no centro */
+  body.com-barra main{padding-bottom:96px}
+  .acoes{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;display:grid;grid-template-columns:repeat(5,1fr);gap:0;background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:6px 4px max(8px,env(safe-area-inset-bottom))}
+  .acoes .btn{flex-direction:column;gap:3px;border:0;background:none;box-shadow:none;font-size:11px;padding:4px 2px;color:var(--muted)}
+  .acoes .btn .ic{width:22px;height:22px}
+  .acoes .btn span.rot{display:none}.acoes .btn span.rot-curto{display:inline}
+  .acoes .btn.primary{color:var(--ink)}
+  .acoes .btn.primary .ic{width:50px;height:50px;padding:13px;margin-top:-26px;border-radius:50%;background:var(--pri);color:#fff;border:4px solid var(--card);box-shadow:0 4px 12px rgba(29,78,216,.35);box-sizing:border-box}
+  .acoes .btn:last-child{grid-column:auto}
+}
+/* aparência (tema) */
+.segmentos{display:inline-flex;background:var(--chip);border-radius:12px;padding:3px;gap:3px;flex-wrap:wrap}
+.segmentos button{font:inherit;font-size:14px;border:0;background:none;color:var(--muted);padding:7px 14px;border-radius:9px;cursor:pointer;font-weight:500}
+.segmentos button.on{background:var(--card);color:var(--ink);box-shadow:var(--sombra)}
 </style>
 </head>
 <body>
@@ -242,6 +379,41 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
 // ---------- Utilidades ----------
 const $ = s => document.querySelector(s);
+// Ícones desenhados (traço), iguais em todos os aparelhos, no lugar dos emojis nos botões principais
+const ICONES = {
+  mais: '<path d="M12 5v14M5 12h14"/>',
+  livro: '<path d="M4 4.5C4 3.7 4.7 3 5.5 3H20v16H5.5C4.7 19 4 19.7 4 20.5zM4 20.5C4 21.3 4.7 22 5.5 22H20M8 7.5h8"/>',
+  laudos: '<path d="M8 3h8l4 4v11H8z"/><path d="M16 3v4h4M5 7v14h11"/>',
+  caixa: '<path d="M3 13l3-8h12l3 8v6H3z"/><path d="M3 13h5l1 3h6l1-3h5"/>',
+  cracha: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16c.8-1.5 2-2.2 3.5-2.2s2.7.7 3.5 2.2M14.5 10h4M14.5 13.5h3"/>',
+  ajustes: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  nuvem: '<path d="M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 8.5a4.2 4.2 0 0 1-.5 9.5"/><path d="M12 12v8M9 15l3-3 3 3"/>',
+  olho: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  compartilhar: '<circle cx="6" cy="12" r="2.4"/><circle cx="17.5" cy="6" r="2.4"/><circle cx="17.5" cy="18" r="2.4"/><path d="M8.2 10.9l7.1-3.7M8.2 13.1l7.1 3.7"/>',
+  pdf: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M12.5 10.5v6m0 0l-2.5-2.5m2.5 2.5l2.5-2.5"/>',
+  enviar: '<path d="M21 3L10 14M21 3l-7 18-4-7-7-4z"/>',
+  imagem: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.6"/>',
+  lixo: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  casa: '<path d="M4 11l8-7 8 7M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>',
+  chave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
+  caneta: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  gota: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+  moeda: '<circle cx="12" cy="12" r="9"/><path d="M15 9.2c-.6-1-1.7-1.5-3-1.5-1.8 0-3 .9-3 2.2 0 3 6 1.6 6 4.4 0 1.3-1.3 2.2-3 2.2-1.4 0-2.6-.6-3.2-1.6M12 6v1.7M12 16.3V18"/>',
+  certo: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  seta: '<path d="M9 5l7 7-7 7"/>',
+  voltar: '<path d="M15 5l-7 7 7 7"/>',
+  busca: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  copiar: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',
+  pontos: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  galeria: '<rect x="7" y="7" width="14" height="13" rx="2"/><path d="M3 16V5a2 2 0 0 1 2-2h11"/><circle cx="12" cy="12" r="1.6"/><path d="M21 17l-4-4-6 6"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
+};
+const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONES[n] || ''}</svg>`;
+// cor de cada tipo de laudo (etiquetas, ícones e cartões)
+const COR_TIPO = { previa: 'azul', entrega: 'verde', ressalvas: 'roxo', ocorrencia: 'laranja', avaliacao: 'teal' };
+const ICONE_TIPO = { previa: 'casa', entrega: 'chave', ressalvas: 'caneta', ocorrencia: 'gota', avaliacao: 'moeda' };
 const app = $('#app');
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -496,6 +668,8 @@ function migrar(v) {
   v.av = Object.assign(novaAv(), v.av || {});
   v.rs = Object.assign(novoRs(), v.rs || {});
   v.oc = Object.assign(novoOc(), v.oc || {});
+  // até a versão 2.3 não havia o registro de local e hora
+  v.geo = { fotos: !!(v.geo && v.geo.fotos), registros: v.geo && Array.isArray(v.geo.registros) ? v.geo.registros : [] };
   return v;
 }
 const semLocatario = v => v.tipo === 'previa' && v.acompanhou === 'nao';
@@ -521,7 +695,7 @@ function baixar(blob, nome) {
 let cur = null, tab = 0, saveT = null;
 function novaVistoria(tipo) {
   return { id: uid(), tipo, data: hoje(), rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', contrato: '',
-    partes: partesIniciais(), av: novaAv(), rs: novoRs(), oc: novoOc(), fotoDataHora: false, vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
+    partes: partesIniciais(), av: novaAv(), rs: novoRs(), oc: novoOc(), geo: { fotos: false, registros: [] }, fotoDataHora: false, vistoriador: '', chaves: '', agua: '', luz: '', gas: '', obs: '', declaracao: '', acompanhou: 'sim',
     comodos: [], criadoEm: Date.now(), atualizadoEm: Date.now() };
 }
 // "base" = tipo do cômodo (Quarto, Banheiro…), usado na numeração automática.
@@ -562,6 +736,7 @@ async function flush() {
   cur.atualizadoEm = Date.now();
   await dbPut(cur);
   flash('Salvo ✓');
+  atualizarEtapas();
 }
 
 // ---------- Fotos ----------
@@ -663,6 +838,7 @@ function sanitizar(o) {
   v.rs.responsavelOriginal = TXT(rs.responsavelOriginal, 300);
   v.rs.prazoDias = /^\d{1,3}$/.test(String(rs.prazoDias)) ? String(rs.prazoDias) : '10';
   v.fotoDataHora = o.fotoDataHora === true;
+  v.capa = o.capa !== false;
   const oc = o.oc && typeof o.oc === 'object' ? o.oc : {};
   v.oc = novoOc();
   for (const k of CAMPOS_OC) if (k !== 'solicitanteProprio') v.oc[k] = TXT(oc[k], ['descricao', 'origem', 'providencias'].includes(k) ? 20000 : 300);
@@ -688,9 +864,44 @@ function sanitizar(o) {
       .filter(f => f && typeof f.data === 'string' && IMG_OK.test(f.data)).slice(0, 500)
       .map(f => ({ id: uid(), legenda: TXT(f.legenda, 500), data: f.data, w: Math.max(1, +f.w || 1), h: Math.max(1, +f.h || 1),
         em: typeof f.em === 'string' && DATA_FOTO_OK.test(f.em) ? f.em : '', emCamera: f.emCamera === true,
-        gps: f.gps && isFinite(f.gps.lat) && isFinite(f.gps.lon) && Math.abs(f.gps.lat) <= 90 && Math.abs(f.gps.lon) <= 180 ? { lat: +f.gps.lat, lon: +f.gps.lon } : null }))
+        gps: f.gps && coordOk(+f.gps.lat, +f.gps.lon) ? { lat: +f.gps.lat, lon: +f.gps.lon } : null,
+        local: sanitizarLocal(f.local) }))
   }));
+  v.geo = sanitizarGeo(o.geo);
   return v;
+}
+const coordOk = (la, lo) => typeof la === 'number' && typeof lo === 'number' && isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180;
+function sanitizarLocal(l) {
+  if (!l || typeof l !== 'object' || !coordOk(+l.lat, +l.lon)) return null;
+  return { lat: +l.lat, lon: +l.lon, prec: isFinite(+l.prec) ? Math.max(0, +l.prec) : null, em: TXT(l.em, 40),
+    conferida: l.conferida === true, endereco: TXT(l.endereco, 300) };
+}
+// Registros de local e hora vindos de arquivo: ficam só dados simples (sem código) e de tamanho limitado.
+// Os valores não são corrigidos: se algo tiver sido alterado, a conferência do hash do registro acusa.
+function limparDados(x, prof = 0) {
+  if (x === null || typeof x === 'boolean') return x;
+  if (typeof x === 'number') return isFinite(x) ? x : null;
+  if (typeof x === 'string') return x.slice(0, 4000);
+  if (prof > 6 || typeof x !== 'object') return null;
+  if (Array.isArray(x)) return x.slice(0, 50).map(i => limparDados(i, prof + 1));
+  const r = {};
+  for (const k of Object.keys(x).slice(0, 60)) if (k !== '__proto__' && k !== 'constructor') r[k] = limparDados(x[k], prof + 1);
+  return r;
+}
+function sanitizarGeo(g) {
+  const r = { fotos: !!(g && g.fotos === true), registros: [] };
+  if (!g || !Array.isArray(g.registros)) return r;
+  for (const o of g.registros.slice(0, 20)) {
+    if (!o || typeof o !== 'object' || typeof o.id !== 'string' || !o.localizacao || !o.horario) continue;
+    const m = o.mapa && typeof o.mapa === 'object' ? o.mapa : null;
+    const img = m && typeof m.dataUrl === 'string' && m.dataUrl.length < 3e6 && IMG_OK.test(m.dataUrl) ? m.dataUrl : null;
+    const reg = limparDados({ ...o, mapa: m ? { ...m, dataUrl: null } : null });
+    if (reg.mapa) reg.mapa.dataUrl = img;
+    if (!reg.localizacao || !coordOk(reg.localizacao.latitude, reg.localizacao.longitude)) continue;
+    if (!reg.horario || typeof reg.horario !== 'object') continue;
+    r.registros.push(reg);
+  }
+  return r;
 }
 // O cabeçalho (logo, nome e contato de quem elabora) viaja junto nos arquivos.
 function sanitizarCabecalho(c) {
@@ -841,12 +1052,192 @@ async function abrirEnvio(v) {
   });
 }
 
+// ---------- Registro de local e hora (motor GeoRegistro, em lib/georegistro.js) ----------
+// Opcional em cada laudo: o registro do local da vistoria (cur.geo.registros, guardados dentro do laudo,
+// para irem junto no backup e no "Enviar p/ edição") e, se ligado, o local do aparelho nas fotos
+// tiradas pelo botão "Tirar foto" (f.local). A localização é pedida só no momento do toque.
+const temGeo = !!window.GeoRegistro;
+if (temGeo) GeoRegistro.configurar({
+  appId: 'vistoria', // separa estes registros dos outros aplicativos publicados no mesmo endereço
+  mapa: { ativo: true },
+  pdf: { titulo: 'REGISTRO DE LOCAL E HORA DA VISTORIA', corPrincipal: '#1d4ed8', corDestaque: '#16a34a', rodape: '© 2026 Felippe Alvarez · Laudar' }
+});
+// local da foto: o gravado pela câmera tem prioridade sobre o do aparelho
+const coordenadasFoto = f => f.gps && coordOk(f.gps.lat, f.gps.lon) ? f.gps : f.local && coordOk(f.local.lat, f.local.lon) ? { lat: f.local.lat, lon: f.local.lon } : null;
+const fmtCoord = (la, lo) => `${(+la).toFixed(6)}, ${(+lo).toFixed(6)}`;
+const linkMapa = (la, lo) => `https://www.google.com/maps?q=${+la},${+lo}`;
+function fmtGeoHora(r) {
+  try { return new Date(r.horario.dispositivoEpochMs).toLocaleString('pt-BR', { timeZone: r.horario.fusoIANA || undefined }); }
+  catch { return String(r.horario.dispositivoISO || ''); }
+}
+// situação da hora: conferida na internet, divergente do relógio do aparelho ou não conferida
+function conferenciaHora(r) {
+  const h = r.horario || {};
+  if (!h.referenciaConfirmada) return { ok: false, txt: 'não conferida (sem internet no momento do registro)' };
+  if (h.alertaRelogio) return { ok: false, txt: `o relógio do aparelho diferia ${Math.round(Math.abs(h.diferencaSeg))} s da hora da internet` };
+  return { ok: true, txt: 'conferida pela internet' };
+}
+const geoPendente = r => !!((r.endereco && r.endereco.pendente && !r.endereco.texto) || (r.mapa && r.mapa.pendente && !r.mapa.dataUrl));
+
+function blocoGeo(v) {
+  if (!temGeo) return '';
+  const regs = v.geo.registros;
+  return `
+    <h3>📍 Local e hora da vistoria <span class="muted" style="font-weight:400">(opcional)</span></h3>
+    <p class="muted" style="margin-top:0">Registra a localização do aparelho e a hora <strong>somente no momento do toque</strong>, como indício de que a vistoria foi feita no imóvel. Não há rastreamento contínuo.</p>
+    ${regs.map((r, i) => cartaoGeo(r, i)).join('')}
+    <div class="row">
+      <button class="btn${regs.length ? '' : ' primary'}" data-act="geoRegistrar">📍 ${regs.length ? 'Registrar novamente (ex.: saída)' : 'Registrar local e hora'}</button>
+      ${regs.some(geoPendente) ? '<button class="btn" data-act="geoCompletar">↻ Completar endereço e mapa</button>' : ''}
+    </div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-geofotos ${v.geo.fotos ? 'checked' : ''}>
+      <span>Registrar também o local do aparelho nas fotos tiradas com “📷 Tirar foto” neste laudo</span></label>`;
+}
+function cartaoGeo(r, i) {
+  const l = r.localizacao, e = r.endereco || {}, h = conferenciaHora(r);
+  return `<div class="geo-reg">
+    ${r.mapa && r.mapa.dataUrl ? `<img class="geo-mapa" src="${r.mapa.dataUrl}" alt="Mapa do local registrado">` : '<div class="geo-mapa geo-sem-mapa">Mapa pendente</div>'}
+    <div class="geo-info">
+      <strong>${esc(r.observacao || 'Registro ' + (i + 1))}</strong>
+      <dl>
+        <dt>Data e hora</dt><dd>${esc(fmtGeoHora(r))}</dd>
+        <dt>Hora</dt><dd class="${h.ok ? 'ok' : 'alerta'}">${h.ok ? '✓ ' : '⚠️ '}${esc(h.txt)}</dd>
+        <dt>Margem de erro</dt><dd class="${l.precisaoBaixa ? 'alerta' : 'ok'}">± ${esc(Math.round(l.precisaoM))} m${l.precisaoBaixa ? ' (precisão baixa)' : ''}</dd>
+        <dt>Endereço pelo GPS</dt><dd>${e.texto ? esc(e.texto) + (e.aproximado ? ' (aproximado)' : '') : 'pendente: precisa de internet'}</dd>
+        <dt>Coordenadas</dt><dd>${esc(fmtCoord(l.latitude, l.longitude))}</dd>
+        <dt>Integridade</dt><dd data-geoint="${i}">verificando…</dd>
+      </dl>
+      <div class="row">
+        <a class="btn" href="${esc(linkMapa(l.latitude, l.longitude))}" target="_blank" rel="noopener">🗺️ Ver no mapa</a>
+        <button class="btn" data-act="geoPdf" data-i="${i}">📄 Comprovante</button>
+        <button class="btn danger" data-act="geoExcluir" data-i="${i}">Remover</button>
+      </div>
+    </div>
+  </div>`;
+}
+// confere o hash de cada registro mostrado na tela
+function verificarGeo() {
+  if (!temGeo || !cur) return;
+  cur.geo.registros.forEach((r, i) => GeoRegistro.verificarIntegridade(r).then(res => {
+    const el = app.querySelector(`[data-geoint="${i}"]`); if (!el) return;
+    el.className = res.ok ? 'ok' : 'alerta';
+    el.textContent = res.ok ? '✓ registro não alterado desde que foi salvo' : res.motivo === 'SEM_HASH' ? '⚠️ registro sem código de integridade' : '⚠️ o registro foi alterado depois de salvo';
+  }, () => {}));
+}
+
+// Janela de captura: localiza, mostra o resultado e só grava quando a pessoa confirma.
+function abrirRegistroGeo() {
+  const v = cur;
+  const ov = document.createElement('div'); ov.className = 'modal';
+  const caixa = document.createElement('div'); caixa.className = 'modal-caixa'; ov.appendChild(caixa);
+  document.body.appendChild(ov);
+  let aberto = true, rascunho = null;
+  const fechar = () => { aberto = false; ov.remove(); };
+  const capturar = () => {
+    rascunho = null;
+    caixa.innerHTML = `<h2>📍 Registrar local e hora</h2>
+      <p class="muted" style="margin-top:0">${esc(GeoRegistro.textos.aviso)}</p>
+      <p class="aviso" id="geo-status">Pedindo a localização ao aparelho… Se o navegador perguntar, toque em <strong>Permitir</strong>.</p>
+      <div class="modal-botoes"><button class="btn" data-g="fechar">Cancelar</button></div>`;
+    const st = caixa.querySelector('#geo-status');
+    GeoRegistro.capturar({
+      tipo: 'vistoria',
+      onStatus: s => {
+        if (!aberto) return;
+        if (s.etapa === 'localizando') st.textContent = `Localizando… margem de erro atual: ± ${s.precisaoM} m (aguardando ficar abaixo de 25 m)`;
+        if (s.etapa === 'obtendo_endereco_e_hora') st.textContent = `Ponto obtido (± ${s.precisaoM} m). Buscando o endereço, conferindo a hora e montando o mapa…`;
+      }
+    }).then(r => { if (aberto) { rascunho = r; mostrar(); } }, err => {
+      if (!aberto) return;
+      caixa.innerHTML = `<h2>📍 Não foi possível registrar</h2><p class="aviso">${esc(err.message)}</p>
+        <div class="modal-botoes"><button class="btn primary" data-g="denovo">Tentar de novo</button><button class="btn" data-g="fechar">Fechar</button></div>`;
+    });
+  };
+  const mostrar = () => {
+    const r = rascunho, l = r.localizacao, e = r.endereco || {}, h = conferenciaHora(r);
+    caixa.innerHTML = `<h2>📍 Confira o registro</h2>
+      ${r.mapa && r.mapa.dataUrl ? `<img class="geo-mapa grande" src="${r.mapa.dataUrl}" alt="Mapa do local">` : '<p class="aviso">Sem imagem de mapa agora (sem internet ou servidor indisponível). Ela pode ser feita depois.</p>'}
+      <dl class="geo-dl">
+        <dt>Data e hora</dt><dd>${esc(fmtGeoHora(r))}</dd>
+        <dt>Hora</dt><dd class="${h.ok ? 'ok' : 'alerta'}">${esc(h.txt)}</dd>
+        <dt>Margem de erro</dt><dd class="${l.precisaoBaixa ? 'alerta' : 'ok'}">± ${esc(Math.round(l.precisaoM))} m</dd>
+        <dt>Endereço pelo GPS</dt><dd>${e.texto ? esc(e.texto) : 'não obtido agora (será buscado depois)'}</dd>
+      </dl>
+      ${l.precisaoBaixa ? '<p class="aviso">Precisão baixa. Se puder, vá para perto de uma janela ou área aberta e toque em “Tentar de novo”, ou salve assim mesmo.</p>' : ''}
+      <label>Descrição do registro<input id="geo-obs" maxlength="200" value="${v.geo.registros.length ? 'Saída do imóvel' : 'Chegada ao imóvel'}"></label>
+      <div class="modal-botoes">
+        <button class="btn primary" data-g="salvar">Salvar no laudo</button>
+        <button class="btn" data-g="denovo">Tentar de novo</button>
+        <button class="btn" data-g="fechar">Descartar</button>
+      </div>`;
+  };
+  caixa.addEventListener('click', async e => {
+    const b = e.target.closest('[data-g]'); if (!b) return;
+    if (b.dataset.g === 'fechar') return fechar();
+    if (b.dataset.g === 'denovo') return capturar();
+    if (b.dataset.g === 'salvar' && rascunho) {
+      b.disabled = true;
+      try {
+        const reg = await GeoRegistro.salvar(rascunho, { observacao: caixa.querySelector('#geo-obs').value.trim() });
+        v.geo.registros.push(JSON.parse(JSON.stringify(reg)));
+        fechar();
+        if (cur === v) { await flush(); telaEditor(); } else await dbPut(v);
+        flash('Local e hora registrados ✓', 3000);
+      } catch (err) { b.disabled = false; alert('Não foi possível salvar o registro: ' + err.message); }
+    }
+  });
+  capturar();
+}
+// registros feitos sem internet: completa endereço e mapa (só os feitos neste aparelho, guardados pelo motor)
+async function completarGeo() {
+  const v = cur;
+  try { await GeoRegistro.completarPendentes(); } catch (err) { return alert('Não foi possível completar agora: ' + err.message); }
+  let n = 0, fora = 0;
+  for (let i = 0; i < v.geo.registros.length; i++) {
+    const r = v.geo.registros[i];
+    if (!geoPendente(r)) continue;
+    const novo = await GeoRegistro.obter(r.id).catch(() => null);
+    if (!novo) { fora++; continue; }
+    if (!geoPendente(novo)) n++;
+    v.geo.registros[i] = JSON.parse(JSON.stringify(novo));
+  }
+  await flush(); telaEditor();
+  alert(n ? `${n} registro(s) completado(s).` : fora ? 'Este registro foi feito em outro aparelho e só pode ser completado lá.' : 'Ainda não foi possível completar (verifique a internet e tente de novo).');
+}
+
+// Local do aparelho nas fotos: a localização começa a ser obtida quando a câmera é aberta,
+// enquanto a pessoa enquadra a foto, e é anexada às fotos quando fica pronta.
+let geoFoto = null;
+const geoPendentes = new Set();
+function iniciarGeoFoto() {
+  geoFoto = { inicio: Date.now(), p: GeoRegistro.capturar({ tipo: 'foto', mapa: false, tempoMaxMs: 15000 }).then(r => r, erro => ({ erro })) };
+}
+async function anexarGeoFoto(g, vid, ids) {
+  ids.forEach(id => geoPendentes.add(id));
+  const r = await g.p;
+  ids.forEach(id => geoPendentes.delete(id));
+  const marcar = (id, txt) => { const el = app.querySelector(`[data-local="${id}"]`); if (el) { el.textContent = txt; el.hidden = !txt; } };
+  if (r.erro) {
+    ids.forEach(id => marcar(id, ''));
+    if (r.erro.codigo === 'PERMISSAO_NEGADA') alert('Sem permissão para usar a localização: ' + r.erro.message);
+    else flash('Foto salva sem localização (' + r.erro.message + ')', 6000);
+    return;
+  }
+  const local = { lat: r.localizacao.latitude, lon: r.localizacao.longitude, prec: r.localizacao.precisaoM,
+    em: r.horario.dispositivoISO, conferida: !!r.horario.referenciaConfirmada, endereco: (r.endereco && r.endereco.texto) || '' };
+  const alvo = cur && cur.id === vid ? cur : migrar(await dbGet(vid));
+  if (!alvo) return;
+  for (const c of alvo.comodos) for (const f of c.fotos) if (ids.includes(f.id)) { f.local = local; marcar(f.id, rotuloLocal(f)); }
+  if (alvo === cur) salvar(); else await dbPut(alvo);
+}
+const rotuloLocal = f => f.gps ? '📍 câmera' : f.local ? `📍 aparelho ±${Math.round(f.local.prec || 0)} m` : geoPendentes.has(f.id) ? '📍 obtendo local…' : '';
+
 // ---------- Exportação das fotos do laudo ----------
 // Exporta a versão otimizada (a mesma usada no laudo). Quando a câmera forneceu, a data da captura e a
 // localização GPS são gravadas de volta no arquivo JPEG, para conferência de quando e onde a foto foi tirada.
 function blocoExif(f) {
   const data = f.emCamera && DATA_FOTO_OK.test(f.em || '') ? f.em.slice(0, 19).replace(/-/g, ':').replace('T', ' ') : '';
-  const gps = f.gps && isFinite(f.gps.lat) && isFinite(f.gps.lon) ? f.gps : null;
+  const gps = coordenadasFoto(f);
   if (!data && !gps) return null;
   const n0 = (data ? 1 : 0) + (gps ? 1 : 0), tamIfd = n => 2 + n * 12 + 4;
   let p = 8 + tamIfd(n0);
@@ -988,7 +1379,7 @@ async function abrirFotos(v) {
     const n = escolhidas().length;
     caixa.innerHTML = `
       <h2>🖼️ Fotos do laudo</h2>
-      <p class="muted" style="margin-top:0">Versão otimizada (até 1600 px), em JPEG. A data e a localização gravadas pela câmera são mantidas no arquivo quando estiverem disponíveis.</p>
+      <p class="muted" style="margin-top:0">Versão otimizada (até 1600 px), em JPEG. A data da câmera e a localização (da câmera ou, se registrada, do aparelho) vão gravadas no arquivo quando estiverem disponíveis.</p>
       <label>Quais fotos<select id="fotos-escopo">
         <option value="todas" ${escopo === 'todas' ? 'selected' : ''}>Todas as fotos (${todas.length})</option>
         ${v.comodos.map((c, ci) => c.fotos.length ? `<option value="${ci}" ${escopo === String(ci) ? 'selected' : ''}>${esc(c.nome || 'Cômodo')} (${c.fotos.length})</option>` : '').join('')}
@@ -1178,6 +1569,7 @@ function cancelarDitado() {
 // (assim o botão "voltar" do celular e do navegador funciona normalmente)
 const ir = rota => { location.hash = '#/' + rota; };
 function topo(titulo, voltarPara) {
+  document.body.classList.remove('com-barra'); // barra de ações fixa: só no editor (celular)
   $('#titulo').textContent = titulo;
   const a = $('#voltar');
   a.hidden = !voltarPara;
@@ -1216,45 +1608,83 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '2.3';
+const VERSAO_APP = '3.0';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
+const desenharEtapas = v => etapasLaudo(v).map(e =>
+  `<button class="etapa ${e.ok ? 'ok' : e.parcial ? 'parcial' : ''}" data-act="etapa" data-e="${e.id}"><i></i>${e.ok ? '✓ ' : ''}${e.nome}</button>`).join('');
+function atualizarEtapas() { const el = $('.etapas'); if (el && cur) el.innerHTML = desenharEtapas(cur); }
+// Andamento do laudo em 4 etapas (mostrado na tela inicial e no topo do editor)
+const PARTES_PRINCIPAIS = v => ehAvaliacao(v) ? (ehJudicial(v) ? ['ativo'] : ['solicitantes']) : ehOcorrencia(v) ? ['donos']
+  : ehRessalvas(v) ? ['locatarios'] : ['locadores', 'locatarios'];
+function etapasLaudo(v) {
+  const comodosOk = v.comodos.length > 0 && v.comodos.every(c => c.descricao.trim() || c.fotos.length);
+  return [
+    { id: 'dados', nome: 'Dados', ok: !!(v.rua && v.cidade && v.data) },
+    { id: 'partes', nome: 'Partes', ok: PARTES_PRINCIPAIS(v).every(cat => (v.partes[cat] || []).some(p => p.nome.trim())) },
+    { id: 'comodos', nome: 'Cômodos', ok: comodosOk, parcial: !comodosOk && v.comodos.length > 0 },
+    { id: 'pdf', nome: 'PDF', ok: !!v.pdfEm }
+  ];
+}
+const andamento = v => etapasLaudo(v).reduce((n, e) => n + (e.ok ? 1 : e.parcial ? 0.5 : 0), 0) / 4;
+const primeiraFoto = v => { for (const c of v.comodos) if (c.fotos.length) return c.fotos[0].data; return null; };
+const capaLaudo = (v, href) => {
+  const f = primeiraFoto(v);
+  return f ? `<a href="${href}"><img class="laudo-capa" src="${f}" alt=""></a>`
+    : `<a class="laudo-capa cor-${COR_TIPO[v.tipo]}" href="${href}">${ic(ICONE_TIPO[v.tipo])}</a>`;
+};
+const saudacaoHora = () => { const h = new Date().getHours(); return h < 5 ? 'Boa noite' : h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
+
 async function telaInicio() {
   topo('', null); // na tela inicial o nome aparece em destaque no corpo da página
   const [todas, cfg, ub] = await Promise.all([dbAll(), cfgGet(), cfgLer('ultimoBackup')]);
   // lembrete: com laudos salvos e sem backup há 7 dias ou mais
   const diasBackup = ub ? Math.floor((Date.now() - ub.em) / 86400000) : null;
   const lembrarBackup = todas.length > 0 && (diasBackup === null || diasBackup >= 7);
+  const laudos = todas.map(migrar).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+  const emAndamento = laudos.filter(v => andamento(v) < 1);
   app.innerHTML = `
-  <div class="marca">
-    <img class="marca-simbolo" src="icons/simbolo.svg" alt="">
-    <div class="marca-texto">
-      <div class="marca-nome">LAUDAR</div>
-      <div class="marca-sub">VISTORIA DE IMÓVEIS</div>
+  <section class="hero">
+    <div class="hero-topo">
+      <span class="hero-logo"><img src="icons/simbolo.svg" alt=""></span>
+      <div><div class="hero-nome">LAUDAR</div><div class="hero-sub">VISTORIA DE IMÓVEIS</div></div>
     </div>
-  </div>
-  <p class="saudacao">${cfg.nome ? `Olá, <strong>${esc(cfg.nome)}</strong>. ` : ''}O que deseja fazer?</p>
-  ${lembrarBackup ? `<section class="card aviso-backup">
-    <div><strong>💾 ${diasBackup === null ? 'Você ainda não fez backup das suas vistorias.' : `Seu último backup foi há ${diasBackup} dias.`}</strong>
-      <div class="muted">As vistorias e o cadastro ficam só neste aparelho. Se o aplicativo for desinstalado ou os dados do navegador forem apagados, eles se perdem.</div></div>
-    <button class="btn primary" data-act="backuptodas">Fazer backup agora</button>
-  </section>` : ''}
-  <div class="menu">
-    <a class="tile tutorial" href="#/tutorial"><span class="ico">📘</span><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></a>
-    <a class="tile primary largo" href="#/novo"><span class="ico">➕</span><strong>Novo laudo</strong><small>Vistorias, constatações e avaliações</small></a>
-    <a class="tile" href="#/vistorias"><span class="ico">📋</span><strong>Minhas vistorias e avaliações</strong><small>${todas.length ? `${todas.length} salva${todas.length > 1 ? 's' : ''}: continuar, gerar PDF` : 'Nenhuma ainda'}</small></a>
-    <a class="tile" href="#/recebidos"><span class="ico">📥</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
-    <a class="tile" href="#/cadastro"><span class="ico">🪪</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação no PDF' : 'Pendente: logo e identificação'}</small></a>
-    <a class="tile" href="#/config"><span class="ico">⚙️</span><strong>Configurações</strong><small>Pastas dos PDFs e dos laudos</small></a>
-  </div>
-  <section class="card" id="card-instalar" hidden></section>
-  <footer class="rodape">
-    © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.<br>
-    Laudar · Vistoria de Imóveis · versão ${VERSAO_APP}<br>
-    Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).<br>
-    <a href="#/termos">Termos de Uso e Responsabilidades</a><br>
-    <button type="button" class="lk" data-act="compartilharapp">Compartilhar este aplicativo</button>
-  </footer>`;
+    <p class="hero-ola">${saudacaoHora()}${cfg.nome ? ', ' + esc(cfg.nome) : ''}</p>
+    <p class="hero-resumo">${laudos.length ? `${laudos.length} laudo${laudos.length > 1 ? 's' : ''} neste aparelho${emAndamento.length ? ` · ${emAndamento.length} em andamento` : ''}` : 'Comece pelo seu primeiro laudo.'}</p>
+  </section>
+  <div class="home">
+    <a class="acao-principal" href="#/novo"><span class="bolha">${ic('mais')}</span>
+      <div><strong>Novo laudo</strong><small>Vistorias, constatações e avaliações</small></div>${ic('seta')}</a>
+    ${lembrarBackup ? `<section class="card aviso-backup" style="margin:0">
+      <div><strong>${ic('nuvem')} ${diasBackup === null ? 'Você ainda não fez backup das suas vistorias.' : `Seu último backup foi há ${diasBackup} dias.`}</strong>
+        <div class="muted">As vistorias e o cadastro ficam só neste aparelho. Se o aplicativo for desinstalado ou os dados do navegador forem apagados, eles se perdem.</div></div>
+      <button class="btn primary" data-act="backuptodas">Fazer backup agora</button>
+    </section>` : ''}
+    <div class="atalhos">
+      <a class="atalho" href="#/vistorias"><span class="bolha cor-azul">${ic('laudos')}</span><strong>Minhas vistorias e avaliações</strong><small>${laudos.length ? `${laudos.length} salvo${laudos.length > 1 ? 's' : ''}` : 'Nenhum ainda'}</small></a>
+      <a class="atalho" href="#/recebidos"><span class="bolha cor-verde">${ic('caixa')}</span><strong>Laudos de outras pessoas</strong><small>Importar para editar</small></a>
+      <a class="atalho" href="#/cadastro"><span class="bolha cor-ambar">${ic('cracha')}</span><strong>Cadastro do responsável</strong><small>${cfg.nome || cfg.logo ? 'Logo e identificação' : 'Pendente'}</small></a>
+      <a class="atalho" href="#/config"><span class="bolha cor-cinza">${ic('ajustes')}</span><strong>Configurações</strong><small>Pastas, aparência e dados</small></a>
+    </div>
+    <a class="tile-tut" href="#/tutorial"><span class="bolha cor-azul">${ic('livro')}</span>
+      <div><strong>Como fazer uma vistoria</strong><small>Tutorial: uso do aplicativo e boas práticas</small></div>${ic('seta')}</a>
+    ${emAndamento.length ? `<h2 class="sec-tit">Continuar de onde parou</h2>
+    <div class="laudos">${emAndamento.slice(0, 3).map(v => `
+      <a class="laudo" href="#/vistoria/${v.id}" style="text-decoration:none;grid-template-columns:52px minmax(0,1fr)">
+        ${primeiraFoto(v) ? `<img class="laudo-capa" style="width:52px;height:52px" src="${primeiraFoto(v)}" alt="">` : `<span class="laudo-capa cor-${COR_TIPO[v.tipo]}" style="width:52px;height:52px">${ic(ICONE_TIPO[v.tipo])}</span>`}
+        <div><span class="etiqueta cor-${COR_TIPO[v.tipo]}">${TITULO_CURTO[v.tipo]}</span>
+          <span class="laudo-tit">${esc(enderecoCompleto(v) || '(sem endereço)')}</span>
+          <div class="progresso"><i style="width:${Math.round(andamento(v) * 100)}%"></i></div></div>
+      </a>`).join('')}</div>` : ''}
+    <section class="card" id="card-instalar" style="margin:0" hidden></section>
+    <footer class="rodape">
+      © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.<br>
+      Laudar · Vistoria de Imóveis · versão ${VERSAO_APP}<br>
+      Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0), a fonte Inter (licença SIL OFL) e o motor GeoRegistro${temGeo ? ' ' + GeoRegistro.VERSAO : ''}. Mapas © colaboradores do OpenStreetMap.<br>
+      <a href="#/termos">Termos de Uso e Responsabilidades</a><br>
+      <button type="button" class="lk" data-act="compartilharapp">Compartilhar este aplicativo</button>
+    </footer>
+  </div>`;
   atualizarInstalar();
 }
 
@@ -1262,24 +1692,24 @@ async function telaInicio() {
 function telaNovo() {
   topo('Novo laudo', 'inicio');
   const tipos = [
-    ['previa', '🏠', 'Vistoria prévia (entrada)', 'Registra o estado do imóvel no início da locação. É a referência para a devolução.'],
-    ['entrega', '🔑', 'Vistoria de entrega de chaves', 'Registra o estado do imóvel na devolução, para comparar com a vistoria de entrada.'],
-    ['ressalvas', '✍️', 'Vistoria de ressalvas do locatário', 'O locatário aponta as divergências que encontrou no laudo recebido do locador.'],
-    ['ocorrencia', '💧', 'Vistoria de constatação de problema', 'Registra um problema no imóvel (infiltração, vazamento, fissura…), com fotos, para comunicar a terceiros.'],
-    ['avaliacao', '💰', 'Laudo de avaliação de imóvel', 'Caracteriza o imóvel e indica valores estimados de venda e/ou locação (judicial ou extrajudicial).']
+    ['previa', 'Vistoria prévia (entrada)', 'Registra o estado do imóvel no início da locação. É a referência para a devolução.'],
+    ['entrega', 'Vistoria de entrega de chaves', 'Registra o estado do imóvel na devolução, para comparar com a vistoria de entrada.'],
+    ['ressalvas', 'Vistoria de ressalvas do locatário', 'O locatário aponta as divergências que encontrou no laudo recebido do locador.'],
+    ['ocorrencia', 'Vistoria de constatação de problema', 'Registra um problema no imóvel (infiltração, vazamento, fissura…), com fotos, para comunicar a terceiros.'],
+    ['avaliacao', 'Laudo de avaliação de imóvel', 'Caracteriza o imóvel e indica valores estimados de venda e/ou locação (judicial ou extrajudicial).']
   ];
   app.innerHTML = `
   <p class="saudacao">Qual laudo você vai fazer?</p>
-  <div class="tipos">${tipos.map(([t, ico, nome, desc]) => `
-    <button class="tile tipo" data-act="nova" data-tipo="${t}"><span class="ico">${ico}</span><strong>${nome}</strong><small>${desc}</small></button>
-    <a class="link-tipo" href="#/tutorial/${t}">📘 Saiba mais sobre este laudo</a>`).join('')}
+  <div class="tipos">${tipos.map(([t, nome, desc]) => `
+    <button class="tile tipo cor-${COR_TIPO[t]}" data-act="nova" data-tipo="${t}"><span class="bolha">${ic(ICONE_TIPO[t])}</span><strong>${nome}</strong><small>${desc}</small></button>
+    <a class="link-tipo" href="#/tutorial/${t}">${ic('livro')} Saiba mais sobre este laudo</a>`).join('')}
   </div>`;
 }
 
 // TERMOS_VERSAO identifica os Termos: ao alterá-la, todos precisam aceitar de novo.
 // (a 1ª versão, de 30/09/2026, foi registrada com a versão "30/09/2026")
-const TERMOS_VERSAO = '23/10/2026';
-const TERMOS_DATA = '23/10/2026 (inclusão da vistoria de constatação de problema)';
+const TERMOS_VERSAO = '17/11/2026';
+const TERMOS_DATA = '17/11/2026 (inclusão do registro opcional de local e hora)';
 const termosAceitos = async () => { const a = await cfgLer('aceite'); return !!a && a.versao === TERMOS_VERSAO; };
 async function telaTermos(exigirAceite = false) {
   topo('Termos de Uso', exigirAceite ? null : 'inicio');
@@ -1306,6 +1736,7 @@ async function telaTermos(exigirAceite = false) {
       <li>manter a segurança do dispositivo em que o aplicativo é utilizado (senha, bloqueio de tela, atualizações) e dos arquivos gerados;</li>
       <li>responder pelo envio e compartilhamento de laudos, PDFs e arquivos para edição a terceiros, por qualquer meio (WhatsApp, e-mail, pastas compartilhadas, serviços de nuvem etc.);</li>
       <li>decidir sobre o uso do ditado por voz (seção 6), ciente de que a fala é processada por serviço de terceiro, e evitar ditar dados pessoais desnecessários;</li>
+      <li>decidir sobre o uso do registro de local e hora (seção 7), ciente de que as coordenadas são enviadas a serviços de terceiros para obter o endereço, a hora e o mapa, e informar as pessoas envolvidas quando for o caso;</li>
       <li>eliminar os dados quando cessada a finalidade do tratamento, observados os prazos legais de guarda.</li>
     </ol>
     <p>Como não tem acesso aos dados inseridos, o desenvolvedor <strong>não atua como controlador nem como operador</strong> desses dados e não responde por seu tratamento, vazamento, perda ou uso indevido.</p>
@@ -1331,19 +1762,30 @@ async function telaTermos(exigirAceite = false) {
       <li>o usuário deve evitar ditar dados pessoais desnecessários e é o único responsável pelo conteúdo ditado e pela decisão de utilizar a funcionalidade.</li>
     </ol>
 
-    <h3>7. Isenção de responsabilidade</h3>
+    <h3>7. Registro de local e hora (geolocalização)</h3>
+    <p>O aplicativo oferece, <strong>de forma opcional e desligada por padrão</strong>, o registro da localização do aparelho e da hora em cada laudo, por meio do motor GeoRegistro. Sobre essa funcionalidade:</p>
+    <ol>
+      <li>a localização é obtida <strong>somente</strong> quando o usuário toca em “Registrar local e hora” ou, se ele ativar essa opção no laudo, quando abre a câmera pelo botão “Tirar foto”; <strong>não há rastreamento contínuo</strong> nem coleta em segundo plano;</li>
+      <li>o uso depende de autorização concedida pelo próprio usuário no navegador ou no aparelho, que pode ser negada ou revogada a qualquer tempo;</li>
+      <li>para obter o endereço, conferir a hora e montar a imagem do mapa, as coordenadas e as consultas correspondentes são enviadas a serviços de terceiros (OpenStreetMap/Nominatim, servidores de mapas do OpenStreetMap e serviços públicos de hora, como WorldTimeAPI e TimeAPI), sujeitos a seus próprios termos e políticas; sem internet, o registro guarda apenas as coordenadas e a hora do aparelho;</li>
+      <li>os registros ficam armazenados no próprio laudo, no aparelho do usuário, e acompanham o PDF, o backup, o arquivo “Enviar p/ edição” e as fotos exportadas; o desenvolvedor não os recebe e não tem acesso a eles;</li>
+      <li>a localização e a hora são fornecidas pelo próprio aparelho, que pode ser alterado ou apresentar dados imprecisos (sobretudo em ambientes fechados); por isso, o registro é uma <strong>declaração de quem elabora o laudo acompanhada de indícios técnicos</strong> (margem de erro, conferência da hora e código de integridade), e <strong>não prova absoluta</strong> de local e horário; o código de integridade indica apenas se o registro foi alterado depois de salvo;</li>
+      <li>a localização é dado pessoal do usuário e pode indicar a presença de outras pessoas no local; cabe ao usuário decidir sobre o uso da funcionalidade, informar as pessoas envolvidas quando for o caso e compartilhar os registros somente com quem deva recebê-los.</li>
+    </ol>
+
+    <h3>8. Isenção de responsabilidade</h3>
     <p>Na máxima extensão permitida pela legislação aplicável, <strong>o desenvolvedor fica isento de toda e qualquer responsabilidade</strong> por danos diretos ou indiretos, materiais ou morais, lucros cessantes, perda de dados, prejuízos decorrentes de falhas, erros ou indisponibilidade do aplicativo, bem como por quaisquer consequências do uso dos laudos, inclusive em negociações, cobranças, processos administrativos ou judiciais, e por atos do usuário ou de terceiros.</p>
 
-    <h3>8. Serviços e componentes de terceiros</h3>
-    <p>O aplicativo é hospedado no GitHub Pages e pode interagir com serviços de terceiros escolhidos pelo usuário (aplicativos de mensagens, e-mail, serviços de armazenamento em nuvem e serviços de reconhecimento de voz do navegador ou do aparelho), regidos por seus próprios termos e políticas, pelos quais o desenvolvedor não responde. Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0).</p>
+    <h3>9. Serviços e componentes de terceiros</h3>
+    <p>O aplicativo é hospedado no GitHub Pages e pode interagir com serviços de terceiros escolhidos pelo usuário (aplicativos de mensagens, e-mail, serviços de armazenamento em nuvem e serviços de reconhecimento de voz do navegador ou do aparelho), e, quando o usuário utiliza o registro de local e hora, com os serviços de endereço, de hora e de mapas indicados na seção 7, todos regidos por seus próprios termos e políticas, pelos quais o desenvolvedor não responde. Utiliza as bibliotecas jsPDF (licença MIT) e pdf.js (licença Apache 2.0) e o motor GeoRegistro, de titularidade de ${TITULAR}. Os mapas são © colaboradores do OpenStreetMap.</p>
 
-    <h3>9. Propriedade intelectual</h3>
+    <h3>10. Propriedade intelectual</h3>
     <p>O aplicativo, seu código, layout e textos são de titularidade de ${TITULAR}. É concedida ao usuário licença gratuita, pessoal, não exclusiva e revogável de uso. É vedado copiar, modificar, redistribuir ou explorar comercialmente o aplicativo sem autorização prévia e por escrito do titular.</p>
 
-    <h3>10. Alterações destes Termos</h3>
+    <h3>11. Alterações destes Termos</h3>
     <p>Estes Termos podem ser alterados a qualquer tempo, com a publicação da nova versão nesta página. O uso continuado do aplicativo após a alteração implica a aceitação da versão vigente.</p>
 
-    <h3>11. Legislação aplicável e foro</h3>
+    <h3>12. Legislação aplicável e foro</h3>
     <p>Estes Termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da Comarca da Capital do Estado do Rio de Janeiro (cidade do Rio de Janeiro/RJ) para dirimir quaisquer controvérsias deles decorrentes, ressalvadas as hipóteses em que a lei estabeleça competência diversa.</p>
   </article>
   ${exigirAceite ? `
@@ -1359,7 +1801,7 @@ async function telaTermos(exigirAceite = false) {
 const SECOES_TUTORIAL = [
   ['inicio', 'Antes de começar'], ['app', 'Passo a passo no aplicativo'], ['praticas', 'Boas práticas'],
   ['previa', 'Vistoria prévia'], ['entrega', 'Vistoria de entrega'], ['ressalvas', 'Ressalvas do locatário'],
-  ['ocorrencia', 'Constatação de problema'], ['avaliacao', 'Avaliação'], ['lgpd', 'Dados pessoais']
+  ['ocorrencia', 'Constatação de problema'], ['avaliacao', 'Avaliação'], ['local', 'Local e hora'], ['lgpd', 'Dados pessoais']
 ];
 function telaTutorial(secao) {
   topo('Como fazer uma vistoria', 'inicio');
@@ -1386,6 +1828,7 @@ function telaTutorial(secao) {
     <li>Em <strong>Cômodos</strong>, toque em <strong>+ Cômodo</strong> e escolha o tipo. Cômodos repetidos são numerados sozinhos (Quarto 01, Quarto 02…).</li>
     <li>Em cada cômodo, informe o estado geral, escreva a descrição (ou use <strong>🎤 Ditar</strong>) e tire as fotos com <strong>📷 Tirar foto</strong>. Dê uma legenda a cada foto.</li>
     <li>Se quiser, marque <strong>“Imprimir no PDF a data e a hora de cada foto”</strong>: isso reforça o valor de prova das fotos.</li>
+    <li>Também é opcional registrar <strong>📍 o local e a hora da vistoria</strong> e o local das fotos tiradas pelo aplicativo (veja <a href="#/tutorial/local">Local e hora</a>).</li>
     <li>Revise tudo em <strong>👁️ Visualizar</strong>. Depois use <strong>⬇️ Salvar PDF</strong> ou <strong>📤 Compartilhar PDF</strong>.</li>
     <li>Para mandar só as imagens, use <strong>🖼️ Fotos</strong>: escolha todas, as de um cômodo ou algumas, e, se quiser, carimbe em cada uma o cômodo e o endereço. Os arquivos levam a data e a localização gravadas pela câmera, quando o celular as fornece. Pelo WhatsApp, envie como <strong>documento</strong> para não perder a qualidade.</li>
     <li>Imprima ou envie o PDF para assinatura. As partes assinam ao final e rubricam todas as páginas.</li>
@@ -1441,11 +1884,22 @@ function telaTutorial(secao) {
     <li>Os valores são <strong>estimativa do avaliador</strong>: descreva a metodologia e os elementos de comparação utilizados. O aplicativo calcula apenas o valor por m² e o valor por extenso.</li>
   </ul>`)}
 
-  ${s('lgpd', '9. Cuidados com dados pessoais (LGPD)', `<ul>
+  ${s('local', '9. Registro de local e hora (opcional)', `<ul>
+    <li>No laudo, em <strong>📍 Local e hora da vistoria</strong>, toque em <strong>Registrar local e hora</strong> ao chegar ao imóvel e autorize a localização quando o navegador pedir. Se quiser, registre de novo na saída.</li>
+    <li>Aguarde alguns segundos: quanto menor a <strong>margem de erro</strong>, mais preciso é o ponto. Perto de uma janela ou em área aberta costuma ser melhor. Confira o mapa, o endereço e a hora e toque em <strong>Salvar no laudo</strong>.</li>
+    <li>O registro guarda as coordenadas, a margem de erro, a hora do aparelho <strong>conferida pela internet</strong>, o endereço aproximado, uma imagem do mapa e um <strong>código de integridade</strong>, que acusa qualquer alteração posterior. O botão <strong>📄 Comprovante</strong> gera um PDF só do registro.</li>
+    <li>Sem internet, o registro guarda só as coordenadas e a hora; depois, com internet, use <strong>↻ Completar endereço e mapa</strong> no mesmo aparelho.</li>
+    <li>Para registrar também <strong>o local das fotos</strong>, marque a opção logo abaixo. A localização começa a ser obtida quando você toca em <strong>📷 Tirar foto</strong>, e cada foto mostra a origem do local: <strong>câmera</strong> (gravado pela própria câmera) ou <strong>aparelho</strong>. Fotos escolhidas da galeria não recebem o local do aparelho, porque seria o local de agora, e não o de quando foram tiradas.</li>
+    <li>Quando houver registro, o PDF do laudo ganha a seção <strong>Registro de local e hora</strong>, com mapa, coordenadas e a lista das fotos com localização, e as fotos exportadas em <strong>🖼️ Fotos</strong> levam a localização no arquivo.</li>
+    <li>A localização vem do aparelho e pode ser imprecisa ou alterada: o registro reforça o laudo, mas não é prova absoluta. Leia a seção 7 dos <a href="#/termos">Termos de Uso</a>.</li>
+  </ul>`)}
+
+  ${s('lgpd', '10. Cuidados com dados pessoais (LGPD)', `<ul>
     <li>Registre só os dados necessários. Evite fotografar pessoas, documentos e objetos pessoais.</li>
     <li>Proteja o aparelho com senha e bloqueio de tela.</li>
     <li>Envie laudos e arquivos apenas a quem deve recebê-los, e apague-os quando não forem mais necessários.</li>
     <li>O ditado por voz envia a fala ao serviço do navegador (Google, Apple ou Microsoft). Use-o se estiver de acordo.</li>
+    <li>O registro de local e hora envia as coordenadas aos serviços de endereço, hora e mapas (OpenStreetMap e serviços de hora). Use-o se estiver de acordo e avise quem acompanha a vistoria.</li>
   </ul>
   <p class="muted">Leia também os <a href="#/termos">Termos de Uso</a>.</p>`)}
 
@@ -1464,30 +1918,49 @@ async function telaVistorias() {
   const busca = v => [enderecoCompleto(v), v.cidade, ...nomesDe(v, 'locatarios'), ...nomesDe(v, 'locadores'), ...nomesDe(v, 'fiadores'),
     ...nomesDe(v, 'ativo'), ...nomesDe(v, 'passivo'), ...nomesDe(v, 'solicitantes'), ...nomesDe(v, 'proprietarios'), ...nomesDe(v, 'donos'), v.oc.problema, v.av.processo,
     v.origem && v.origem.autor].join(' ');
+  const tiposUsados = Object.keys(TIPOS).filter(t => todas.some(v => v.tipo === t));
   app.innerHTML = `
   <div class="row between" style="margin-bottom:12px">
-    <div class="row">
-      <a class="btn primary" href="#/novo">+ Novo laudo</a>
-    </div>
-    ${todas.length ? '<button class="btn" data-act="backuptodas" title="Salva todas as vistorias e o cadastro do responsável num único arquivo">💾 Backup de todas</button>' : ''}
+    <a class="btn primary" href="#/novo">${ic('mais')} Novo laudo</a>
+    ${todas.length ? `<button class="btn" data-act="backuptodas" title="Salva todas as vistorias e o cadastro do responsável num único arquivo">${ic('nuvem')} Backup de todas</button>` : ''}
   </div>
-  <section class="card">
-    ${todas.length ? `
-    <input class="busca" type="search" data-busca placeholder="🔎 Buscar por endereço, nome das partes, nº do processo…">
-    <ul class="lista">${todas.map(v => `
-      <li data-texto="${esc(chave(busca(v)))}">
-        <div><strong>${esc(enderecoCompleto(v) || '(sem endereço)')}</strong>
-          <small>${TIPOS[v.tipo]} · ${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${ehAvaliacao(v) && v.av.processo ? ' · Proc. ' + esc(v.av.processo) : ''}${pessoas(v).length ? ' · ' + esc(pessoas(v).join(', ')) : ''}</small>
-          ${v.origem ? `<small>📥 Recebida${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</small>` : ''}</div>
-        <div class="row">
-          <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
-          ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}" title="Cria a vistoria de entrega com os mesmos dados e cômodos">Criar entrega</button>
-          <button class="btn" data-act="derivarressalvas" data-id="${v.id}" title="Cria a vistoria de ressalvas do locatário a partir deste laudo">Criar ressalvas</button>` : ''}
-          <button class="btn" data-act="enviar" data-id="${v.id}" title="Envia o laudo para outra pessoa continuar a edição">📨 Enviar p/ edição</button>
-          <button class="btn danger" data-act="excluir" data-id="${v.id}">Excluir</button>
-        </div>
-      </li>`).join('')}</ul>` : '<p class="muted">Nenhuma vistoria salva ainda. Comece pelo botão “+ Novo laudo”.</p>'}
-  </section>`;
+  ${todas.length ? `
+  <div class="busca-box">${ic('busca')}<input type="search" data-busca placeholder="Buscar por endereço, nome das partes, nº do processo…"></div>
+  ${tiposUsados.length > 1 ? `<div class="filtros"><button class="chip on" data-act="filtro" data-tipo="">Todos (${todas.length})</button>${tiposUsados.map(t =>
+    `<button class="chip" data-act="filtro" data-tipo="${t}">${TITULO_CURTO[t]} (${todas.filter(v => v.tipo === t).length})</button>`).join('')}</div>` : ''}
+  <div class="laudos">${todas.map(v => `
+    <article class="laudo" data-texto="${esc(chave(busca(v)))}" data-tipo="${v.tipo}">
+      ${capaLaudo(v, '#/vistoria/' + v.id)}
+      <div>
+        <span class="etiqueta cor-${COR_TIPO[v.tipo]}">${TITULO_CURTO[v.tipo]}</span>
+        <a class="laudo-tit" href="#/vistoria/${v.id}">${esc(enderecoCompleto(v) || '(sem endereço)')}</a>
+        <div class="laudo-meta">${fmtData(v.data)} · ${v.comodos.length} cômodo(s) · ${v.comodos.reduce((n, c) => n + c.fotos.length, 0)} foto(s)${v.geo.registros.length ? ' · 📍' : ''}${ehAvaliacao(v) && v.av.processo ? ' · Proc. ' + esc(v.av.processo) : ''}${pessoas(v).length ? ' · ' + esc(pessoas(v).join(', ')) : ''}</div>
+        ${v.origem ? `<div class="laudo-meta">${ic('caixa')} Recebido${v.origem.autor ? ' de ' + esc(v.origem.autor) : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}</div>` : ''}
+        <div class="progresso" title="Andamento"><i style="width:${Math.round(andamento(v) * 100)}%"></i></div>
+      </div>
+      <div class="laudo-acoes">
+        <a class="btn primary" href="#/vistoria/${v.id}">Abrir</a>
+        <button class="btn" data-act="enviar" data-id="${v.id}" title="Envia o laudo para outra pessoa continuar a edição">${ic('enviar')} Enviar p/ edição</button>
+        <details><summary class="btn" aria-label="Mais ações">${ic('pontos')}</summary>
+          <div class="menu-mais">
+            ${v.tipo === 'previa' ? `<button class="btn" data-act="derivar" data-id="${v.id}">${ic('chave')} Criar vistoria de entrega</button>
+            <button class="btn" data-act="derivarressalvas" data-id="${v.id}">${ic('caneta')} Criar ressalvas do locatário</button>` : ''}
+            <button class="btn" data-act="fotos" data-id="${v.id}">${ic('imagem')} Fotos do laudo</button>
+            <button class="btn danger" data-act="excluir" data-id="${v.id}">${ic('lixo')} Excluir</button>
+          </div></details>
+      </div>
+    </article>`).join('')}</div>
+  <p class="muted vazio" id="sem-resultado" hidden>Nenhum laudo encontrado.</p>`
+  : `<section class="card vazio"><span class="bolha cor-azul">${ic('laudos')}</span><h2>Seu primeiro laudo começa aqui</h2>
+      <p class="muted">Os laudos que você criar aparecem nesta lista, com o andamento de cada um.</p>
+      <a class="btn primary" href="#/novo">${ic('mais')} Novo laudo</a></section>`}`;
+}
+// busca + filtro por tipo na lista de laudos
+function filtrarLaudos() {
+  const q = chave(($('[data-busca]') || {}).value || ''), f = ($('.filtros .chip.on') || { dataset: {} }).dataset.tipo || '';
+  let n = 0;
+  app.querySelectorAll('.laudo[data-texto]').forEach(el => { el.hidden = (q && !el.dataset.texto.includes(q)) || (f && el.dataset.tipo !== f); if (!el.hidden) n++; });
+  const s = $('#sem-resultado'); if (s) s.hidden = n > 0;
 }
 
 async function telaCadastro() {
@@ -1525,7 +1998,14 @@ async function telaConfig() {
       <button class="btn primary" data-act="escolherpasta" data-id="${id}">${h ? 'Trocar pasta' : 'Escolher pasta'}</button>
       ${h ? `<button class="btn" data-act="removerpasta" data-id="${id}">Não usar pasta</button>` : ''}
     </div>` : semSuporte;
+  const tema = document.documentElement.dataset.theme || 'auto';
   app.innerHTML = `
+  <section class="card">
+    <h2>${ic('sol')} Aparência</h2>
+    <p class="muted" style="margin-top:0">O modo automático acompanha o tema claro ou escuro do aparelho.</p>
+    <div class="segmentos" role="group" aria-label="Tema">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']].map(([k, t]) =>
+      `<button class="${k === tema ? 'on' : ''}" data-act="tema" data-t="${k}" aria-pressed="${k === tema}">${t}</button>`).join('')}</div>
+  </section>
   <section class="card">
     <h2>📄 Pasta para salvar os PDFs</h2>
     <p class="muted" style="margin-top:0">Onde o botão "Salvar PDF" grava os laudos.</p>
@@ -1545,6 +2025,7 @@ async function telaConfig() {
     <p>🎤 Ditado por voz: ${temDitado
       ? '<strong>disponível neste navegador</strong>. Funciona somente com internet; o microfone será autorizado no primeiro uso.'
       : '<strong>não disponível neste navegador</strong>. Use o Chrome (Android ou computador), o Edge ou o Safari (iPhone), ou o microfone do teclado do celular.'}</p>
+    <p id="geo-permissao">📍 Registro de local e hora: ${temGeo ? 'verificando a permissão de localização…' : '<strong>não carregou</strong>; recarregue o aplicativo.'}</p>
   </section>
   <section class="card">
     <h2>🛡️ Proteção dos seus dados</h2>
@@ -1560,6 +2041,13 @@ async function telaConfig() {
       <a class="btn" href="#/recebidos">Restaurar um backup</a>
     </div>
   </section>`;
+  if (temGeo) GeoRegistro.estadoPermissao().then(st => {
+    const el = $('#geo-permissao'); if (!el) return;
+    el.innerHTML = '📍 Registro de local e hora (opcional, em cada laudo): ' + ({
+      granted: '<strong>localização permitida</strong> para este aplicativo.',
+      denied: '<strong>localização bloqueada</strong>. Para usar, libere a localização para este site nas configurações do navegador.',
+      prompt: 'o navegador pedirá a permissão no primeiro uso.' }[st] || 'disponível; o navegador pedirá a permissão no primeiro uso.');
+  });
   // o navegador pode apagar dados de sites sem esta proteção quando falta espaço
   const el = $('#persistencia');
   if (el && navigator.storage && navigator.storage.persisted) {
@@ -1636,21 +2124,23 @@ function telaEditor() {
   cancelarDitado();
   const sy = scrollY, v = cur;
   topo({ previa: 'Vistoria prévia', entrega: 'Vistoria de entrega', ressalvas: 'Ressalvas do locatário', ocorrencia: 'Constatação de problema', avaliacao: 'Laudo de avaliação' }[v.tipo], 'vistorias');
+  document.body.classList.add('com-barra');
   app.innerHTML = `
+  <nav class="etapas" aria-label="Andamento do laudo">${desenharEtapas(v)}</nav>
   <div class="acoes">
-    <button class="btn" data-act="previa">👁️ Visualizar</button>
-    <button class="btn" data-act="compartilhar">📤 Compartilhar PDF</button>
-    <button class="btn primary" data-act="pdf">⬇️ Salvar PDF</button>
-    <button class="btn" data-act="enviar" data-id="${v.id}">📨 Enviar p/ edição</button>
-    <button class="btn" data-act="fotos" data-id="${v.id}">🖼️ Fotos</button>
+    <button class="btn" data-act="previa">${ic('olho')}<span class="rot">Visualizar</span><span class="rot-curto">Prévia</span></button>
+    <button class="btn" data-act="fotos" data-id="${v.id}">${ic('imagem')}<span class="rot">Fotos</span><span class="rot-curto">Fotos</span></button>
+    <button class="btn primary" data-act="pdf">${ic('pdf')}<span class="rot">Salvar PDF</span><span class="rot-curto">PDF</span></button>
+    <button class="btn" data-act="compartilhar">${ic('compartilhar')}<span class="rot">Compartilhar PDF</span><span class="rot-curto">Compartilhar</span></button>
+    <button class="btn" data-act="enviar" data-id="${v.id}">${ic('enviar')}<span class="rot">Enviar p/ edição</span><span class="rot-curto">Enviar</span></button>
   </div>
   ${v.origem ? `<p class="aviso">📥 Laudo recebido${v.origem.autor ? ' de <strong>' + esc(v.origem.autor) + '</strong>' : ''} em ${new Date(v.origem.em).toLocaleDateString('pt-BR')}. As alterações ficam só neste aparelho até você usar "Enviar p/ edição".</p>` : ''}
   ${v.cabecalhoRecebido ? `<div class="aviso row between">
     <span>🪪 Cabeçalho do PDF: <strong>${v.usarCabecalhoRecebido ? `de quem enviou (${esc(v.cabecalhoRecebido.nome || 'sem nome')})` : 'o seu'}</strong></span>
     <button class="btn" data-act="trocarcabecalho">${v.usarCabecalhoRecebido ? 'Usar o meu cabeçalho' : `Usar o de ${esc(v.cabecalhoRecebido.nome || 'quem enviou')}`}</button>
   </div>` : ''}
-  <section class="card">
-    <p class="link-tutorial"><a href="#/tutorial/${v.tipo}">📘 Dúvidas? Veja o tutorial</a></p>
+  <section class="card" id="sec-dados">
+    <p class="link-tutorial"><a href="#/tutorial/${v.tipo}">${ic('livro')} Dúvidas? Veja o tutorial</a></p>
     <h2>${ehAvaliacao(v) ? 'Dados do laudo' : 'Dados da vistoria'}</h2>
     <div class="grid">
       <div class="full muted">Tipo de laudo: <strong style="color:var(--ink)">${TIPOS[v.tipo]}</strong></div>
@@ -1664,11 +2154,14 @@ function telaEditor() {
       ${ehAvaliacao(v) ? inpAv('acompanhante', 'Vistoria acompanhada por (nome / qualidade)') : ''}
       <label class="check full"><input type="checkbox" data-fotodata ${v.fotoDataHora ? 'checked' : ''}>
         <span>Imprimir no PDF a data e a hora de cada foto</span></label>
+      <label class="check full"><input type="checkbox" data-capa ${v.capa !== false ? 'checked' : ''}>
+        <span>Incluir capa no PDF (logo, foto principal, endereço e resumo do laudo)</span></label>
     </div>
+    ${blocoGeo(v)}
 
     ${ehAvaliacao(v) ? dadosAvaliacao(v) : ehRessalvas(v) ? dadosRessalvas(v) : ehOcorrencia(v) ? dadosOcorrencia(v) : dadosLocacao(v)}
 
-    <h3>Textos do laudo</h3>
+    <h3 id="sec-textos">Textos do laudo</h3>
     <div class="grid">
       <label class="full">Observações gerais<textarea data-f="obs" rows="3">${esc(v.obs)}</textarea></label>
       ${botaoDitar('[data-f="obs"]', 'full')}
@@ -1680,11 +2173,11 @@ function telaEditor() {
       </div>
     </div>
   </section>
-  <section class="card">
-    <h2>Cômodos</h2>
+  <section class="card" id="sec-comodos">
+    <h2>${ehOcorrencia(v) ? 'Áreas afetadas' : 'Cômodos'}</h2>
     <div class="tabs">
-      ${v.comodos.map((c, i) => `<button class="tab ${i === tab ? 'on' : ''}" data-act="tab" data-i="${i}"><span>${esc(c.nome || 'Sem nome')}</span> <span class="badge">📷${c.fotos.length}</span></button>`).join('')}
-      <button class="tab add" data-act="addmenu">+ Cômodo</button>
+      ${v.comodos.map((c, i) => `<button class="tab ${i === tab ? 'on' : ''}" data-act="tab" data-i="${i}"><span>${esc(c.nome || 'Sem nome')}</span><span class="badge">${c.fotos.length}</span></button>`).join('')}
+      <button class="tab add" data-act="addmenu">${ic('mais')} Cômodo</button>
     </div>
     <div id="addmenu" class="presets" ${v.comodos.length ? 'hidden' : ''}>
       ${PRESETS.map(p => `<button class="chip" data-act="add" data-nome="${esc(p)}">${esc(p)}</button>`).join('')}
@@ -1693,6 +2186,7 @@ function telaEditor() {
     ${painelComodo()}
   </section>`;
   scrollTo(0, sy);
+  verificarGeo();
 }
 
 // campos do laudo de avaliação (guardados em cur.av)
@@ -1931,19 +2425,19 @@ function painelComodo() {
   return `<div class="painel">
     <div class="grid">
       <label>Nome do cômodo<input data-cf="nome" value="${esc(c.nome)}"></label>
-      <label>Estado geral<select data-cf="estado">${ESTADOS.map(e => `<option value="${e}" ${e === c.estado ? 'selected' : ''}>${e || '—'}</option>`).join('')}</select></label>
+      <div><div class="rot-campo">Estado geral</div><div class="estados">${ESTADOS.filter(Boolean).map(e =>
+        `<button class="estado cor-${{ Novo: 'azul', Bom: 'verde', Regular: 'ambar', Ruim: 'laranja' }[e]} ${e === c.estado ? 'on' : ''}" data-act="estado" data-v="${e}" aria-pressed="${e === c.estado}">${e}</button>`).join('')}</div></div>
       <label class="full">${ehRessalvas(cur) ? 'Divergências constatadas (descreva o que difere do laudo do locador e registre com fotos)' : ehOcorrencia(cur) ? 'Problema constatado neste cômodo / área (localização, extensão, aspecto, danos causados…)' : 'Descrição (piso, paredes, teto, portas, janelas, instalações elétricas e hidráulicas, avarias…)'}
         <textarea data-cf="descricao" rows="7">${esc(c.descricao)}</textarea></label>
       ${botaoDitar('[data-cf="descricao"]', 'full')}
     </div>
-    <div class="row">
-      <label class="btn primary">📷 Tirar foto<input type="file" accept="image/*" capture="environment" data-file hidden></label>
-      <label class="btn">🖼️ Escolher fotos<input type="file" accept="image/*" multiple data-file hidden></label>
-      <span id="proc" class="muted"></span>
-    </div>
-    <div class="fotos">${c.fotos.map((f, i) => `
-      <figure>
+    <span id="proc" class="muted"></span>
+    <div class="fotos">
+      <label class="add-foto">${ic('camera')}Tirar foto${cur.geo.fotos ? '<small style="font-weight:400">com local</small>' : ''}<input type="file" accept="image/*" capture="environment" data-file data-camera hidden></label>
+      <label class="add-foto sec">${ic('galeria')}Escolher da galeria<input type="file" accept="image/*" multiple data-file hidden></label>${c.fotos.map((f, i) => `
+      <figure><span class="foto-n">${i + 1}</span>
         <img src="${f.data}" alt="Foto ${i + 1}">${f.em ? `<span class="foto-data">${fmtDataHora(f.em)}</span>` : ''}
+        <span class="foto-local" data-local="${f.id}" ${rotuloLocal(f) ? '' : 'hidden'}>${rotuloLocal(f)}</span>
         <div class="legenda"><input data-pf="${i}" placeholder="Legenda da foto ${i + 1}" value="${esc(f.legenda)}">${botaoDitar(`[data-pf="${i}"]`, 'mini')}</div>
         <button class="x" data-act="delfoto" data-i="${i}" title="Remover foto">×</button>
       </figure>`).join('')}</div>
@@ -1963,11 +2457,7 @@ app.addEventListener('input', e => {
   const t = e.target;
   // se a pessoa digitar no campo durante o ditado, o ditado para e o que ela digitou é mantido
   if (ditado && e.isTrusted && t === ditado.campo) { ditado.editado = true; pararDitado(); }
-  if (t.hasAttribute('data-busca')) {
-    const q = chave(t.value);
-    app.querySelectorAll('.lista li[data-texto]').forEach(li => { li.hidden = q && !li.dataset.texto.includes(q); });
-    return;
-  }
+  if (t.hasAttribute('data-busca')) return filtrarLaudos();
   if (t.dataset.cfg) {
     cfgPend[t.dataset.cfg] = t.value;
     clearTimeout(cfgT);
@@ -2042,6 +2532,19 @@ app.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'concordo') { $('[data-act=aceitar]').disabled = !t.checked; return; }
   if (t.hasAttribute('data-fotodata')) { cur.fotoDataHora = t.checked; salvar(); return; }
+  if (t.hasAttribute('data-capa')) { cur.capa = t.checked; salvar(); return; }
+  if (t.hasAttribute('data-geofotos')) {
+    cur.geo.fotos = t.checked; salvar();
+    // pede a permissão já agora, para o aviso do navegador não aparecer junto com a câmera
+    if (t.checked && (await GeoRegistro.estadoPermissao()) !== 'granted' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(() => flash('Localização permitida ✓', 3000), err => {
+        if (err.code !== 1) return;
+        alert('O navegador não permitiu usar a localização. Para registrar o local nas fotos, autorize a localização para este site nas configurações do navegador.');
+        cur.geo.fotos = false; salvar(); telaEditor();
+      }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+    }
+    return;
+  }
   if (t.hasAttribute('data-moeda')) {
     // ao sair do campo de valor, formata: 450000 -> 450.000,00
     const n = numeroBR(t.value);
@@ -2071,24 +2574,64 @@ app.addEventListener('change', async e => {
     return;
   }
   if (!t.hasAttribute('data-file') || !t.files.length) return;
-  const c = cur.comodos[tab], files = [...t.files], p = $('#proc');
+  const c = cur.comodos[tab], files = [...t.files], p = $('#proc'), novas = [];
+  // local do aparelho: só nas fotos tiradas agora pela câmera (nas da galeria seria o local de agora, não o da foto)
+  const g = t.hasAttribute('data-camera') && geoFoto && Date.now() - geoFoto.inicio < 600000 ? geoFoto : null;
+  geoFoto = null;
   for (let i = 0; i < files.length; i++) {
     p.textContent = `Processando foto ${i + 1} de ${files.length}…`;
     try {
       const cam = await lerDadosCamera(files[i]); // antes de comprimir: a compressão descarta os dados da câmera
       const r = await comprimir(files[i]);
-      c.fotos.push({ id: uid(), legenda: '', em: cam.em, emCamera: cam.emCamera, gps: cam.gps, ...r });
+      const f = { id: uid(), legenda: '', em: cam.em, emCamera: cam.emCamera, gps: cam.gps, local: null, ...r };
+      c.fotos.push(f); novas.push(f.id);
     } catch { alert('Não foi possível ler o arquivo ' + files[i].name); }
   }
+  if (g && novas.length) novas.forEach(id => geoPendentes.add(id));
   await flush();
   telaEditor();
+  if (g && novas.length) anexarGeoFoto(g, cur.id, novas);
 });
 
 app.addEventListener('click', async e => {
+  // câmera aberta pelo "Tirar foto" com o local das fotos ligado: começa a localizar já
+  if (e.target.matches && e.target.matches('input[data-camera]') && cur && cur.geo.fotos && temGeo) iniciarGeoFoto();
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const d = b.dataset;
   switch (d.act) {
+    case 'etapa': {
+      const alvo = { dados: '#sec-dados', partes: '.parte', comodos: '#sec-comodos', pdf: '#sec-textos' }[d.e];
+      const el = alvo && app.querySelector(alvo); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      break;
+    }
+    case 'estado': {
+      const c = cur.comodos[tab]; c.estado = c.estado === d.v ? '' : d.v; // tocar de novo desmarca
+      salvar(); telaEditor(); break;
+    }
+    case 'tema': {
+      if (d.t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = d.t;
+      try { if (d.t === 'auto') localStorage.removeItem('laudar-tema'); else localStorage.setItem('laudar-tema', d.t); } catch { /* sem armazenamento: vale até fechar */ }
+      telaConfig(); break;
+    }
+    case 'filtro':
+      app.querySelectorAll('.filtros .chip').forEach(c => c.classList.toggle('on', c === b));
+      filtrarLaudos(); break;
+    case 'geoRegistrar':
+      if (!temGeo) return alert('O registro de local não carregou. Recarregue o aplicativo.');
+      abrirRegistroGeo(); break;
+    case 'geoCompletar':
+      b.disabled = true; b.textContent = 'Completando…'; await completarGeo(); break;
+    case 'geoPdf':
+      try { await GeoRegistro.baixarPDF(cur.geo.registros[+d.i]); } catch (err) { alert('Não foi possível gerar o comprovante: ' + err.message); }
+      break;
+    case 'geoExcluir': {
+      const r = cur.geo.registros[+d.i];
+      if (!r || !confirm(`Remover o registro "${r.observacao || 'de local e hora'}" deste laudo?`)) return;
+      cur.geo.registros.splice(+d.i, 1);
+      GeoRegistro.excluir(r.id).catch(() => {});
+      salvar(); telaEditor(); break;
+    }
     case 'nova': {
       const v = novaVistoria(d.tipo); await dbPut(v);
       cur = v; tab = 0; scrollTo(0, 0); ir('vistoria/' + v.id); break;
@@ -2284,6 +2827,7 @@ app.addEventListener('click', async e => {
 // ---------- PDF: salvar, visualizar, compartilhar ----------
 const nomePDF = v => `${{ previa: 'Vistoria-previa', entrega: 'Vistoria-entrega', ressalvas: 'Ressalvas-locatario', ocorrencia: 'Constatacao-problema', avaliacao: 'Avaliacao' }[v.tipo]}-${slug(enderecoCompleto(v)) || 'imovel'}-${v.data}.pdf`;
 async function montarPDF() {
+  cur.pdfEm = Date.now(); // etapa "PDF" do andamento
   await flush();
   try { return gerarPDF(cur, await cfgGet()); }
   catch (err) { console.error(err); alert('Erro ao gerar o PDF: ' + err.message); return null; }
@@ -2432,8 +2976,10 @@ function gerarPDF(v, cfg) {
     }
   };
   const texto = txt => para(txt, 10, 'normal', true);
+  const sumario = []; // seções principais e a página em que começam (para a capa)
   const secao = t => {
     ensure(16);
+    if (/^\d+\. /.test(t)) sumario.push({ t: t.replace(/^\d+\.\s*/, ''), n: t.match(/^\d+/)[0], p: doc.getNumberOfPages() });
     doc.setFillColor(232, 237, 245); doc.rect(M, y, CW, 8, 'F');
     font(11, 'bold'); doc.setTextColor(30, 41, 59); doc.text(t, M + 2.5, y + 5.5); doc.setTextColor(0);
     y += 11;
@@ -2474,9 +3020,69 @@ function gerarPDF(v, cfg) {
     lista.forEach((p, i) => parte(CATEGORIAS[cat].um + (lista.length > 1 ? ` ${i + 1}` : '') + ':', p.nome, p.doc, enderecoParte(lista, i)));
   };
 
-  // Cabeçalho do laudo (logo, nome e contato de quem elabora a vistoria)
   const logo = cfg && cfg.logo;
-  if (logo || (cfg && (cfg.nome || cfg.contato))) {
+  const comCapa = v.capa !== false;
+  let fimCapa = 0; // onde o sumário começa na capa
+  if (comCapa) {
+    // Capa: faixa azul com o cabeçalho e o tipo de laudo, foto principal, endereço, resumo e sumário
+    doc.setFillColor(29, 78, 216); doc.rect(0, 0, W, 92, 'F');
+    let tx = M;
+    if (logo) {
+      let lh2 = 20, lw2 = lh2 * logo.w / logo.h; if (lw2 > 44) { lw2 = 44; lh2 = lw2 * logo.h / logo.w; }
+      doc.setFillColor(255, 255, 255); doc.roundedRect(M, 14, lw2 + 6, lh2 + 6, 2.5, 2.5, 'F');
+      doc.addImage(logo.data, 'PNG', M + 3, 17, lw2, lh2, 'logo');
+      tx = M + lw2 + 12;
+    }
+    doc.setTextColor(255, 255, 255);
+    let cy = 20;
+    if (cfg && cfg.nome) { font(12, 'bold'); doc.text(doc.splitTextToSize(cfg.nome, W - M - tx)[0], tx, cy); cy += 5.5; }
+    if (cfg && cfg.contato) { font(8.5); doc.splitTextToSize(cfg.contato, W - M - tx).slice(0, 3).forEach(l => { doc.text(l, tx, cy); cy += 3.9; }); }
+    font(9, 'bold'); doc.text(ehAvaliacao(v) ? 'LAUDO DE AVALIAÇÃO' : 'LAUDO DE VISTORIA', M, 64, { charSpace: 1.2 });
+    font(21, 'bold'); doc.text(doc.splitTextToSize(TITULO_CURTO[v.tipo], CW)[0], M, 74);
+    font(10);
+    const sub = [ehJudicial(v) && v.av.processo ? `Processo nº ${v.av.processo}` : '', fmtData(v.data)].filter(Boolean).join('  ·  ');
+    doc.text(sub, M, 82);
+    doc.setTextColor(0);
+    // foto principal (a primeira do laudo), recortada para preencher a faixa
+    const f0 = v.comodos.flatMap(c => c.fotos)[0];
+    const FY = 92, FH = 78;
+    if (f0) {
+      let fw = W, fh = W * f0.h / f0.w;
+      if (fh < FH) { fh = FH; fw = FH * f0.w / f0.h; }
+      doc.saveGraphicsState();
+      doc.rect(0, FY, W, FH, null); doc.clip(); doc.discardPath();
+      doc.addImage(f0.data, 'JPEG', (W - fw) / 2, FY + (FH - fh) / 2, fw, fh, f0.id);
+      doc.restoreGraphicsState();
+    } else {
+      doc.setFillColor(232, 239, 255); doc.rect(0, FY, W, FH, 'F');
+    }
+    let yy = FY + FH + 12;
+    font(15, 'bold');
+    doc.splitTextToSize(enderecoCompleto(v) || 'Endereço não informado', CW).slice(0, 2).forEach(l => { doc.text(l, M, yy); yy += 6.5; });
+    font(10); doc.setTextColor(100); doc.text(cidadeUF(v), M, yy); doc.setTextColor(0);
+    yy += 7;
+    // resumo em quatro quadros
+    const nFotos = v.comodos.reduce((t, c) => t + c.fotos.length, 0);
+    const nomes = cat => { const l = nomesDe(v, cat); return l.length ? l[0] + (l.length > 1 ? ` e mais ${l.length - 1}` : '') : '-'; };
+    const quadros = ehAvaliacao(v)
+      ? [['Finalidade', FINALIDADES[v.av.finalidade] || '-'], ['Avaliador(a)', v.vistoriador || '-'],
+         [ehJudicial(v) ? 'Polo ativo' : 'Solicitante', nomes(ehJudicial(v) ? 'ativo' : 'solicitantes')], ['Cômodos e fotos', `${v.comodos.length} cômodo(s) · ${nFotos} foto(s)`]]
+      : ehOcorrencia(v)
+      ? [['Problema', v.oc.problema || '-'], ['Proprietário(a)', nomes('donos')], ['Vistoriador(a)', v.vistoriador || '-'], ['Áreas e fotos', `${v.comodos.length} área(s) · ${nFotos} foto(s)`]]
+      : [['Locador(a)', nomes('locadores')], ['Locatário(a)', nomes('locatarios')], ['Vistoriador(a)', v.vistoriador || '-'], ['Cômodos e fotos', `${v.comodos.length} cômodo(s) · ${nFotos} foto(s)`]];
+    const QW = (CW - 4) / 2, QH = 14;
+    quadros.forEach(([r, val], i) => {
+      const qx = M + (i % 2) * (QW + 4), qy = yy + Math.floor(i / 2) * (QH + 3);
+      doc.setFillColor(241, 245, 249); doc.roundedRect(qx, qy, QW, QH, 2, 2, 'F');
+      font(7.5, 'bold'); doc.setTextColor(100); doc.text(r.toUpperCase(), qx + 3.5, qy + 5);
+      font(10); doc.setTextColor(15, 23, 42); doc.text(doc.splitTextToSize(String(val), QW - 7)[0], qx + 3.5, qy + 10.5);
+    });
+    doc.setTextColor(0);
+    fimCapa = yy + 2 * (QH + 3) + 6;
+    novaPag();
+  }
+  // Cabeçalho do laudo (logo, nome e contato de quem elabora a vistoria); com capa, ele já está na capa
+  if (!comCapa && (logo || (cfg && (cfg.nome || cfg.contato)))) {
     let lw = 0, lh = 0;
     if (logo) { lh = 22; lw = lh * logo.w / logo.h; if (lw > 50) { lw = 50; lh = lw * logo.h / logo.w; } doc.addImage(logo.data, 'PNG', M, y, lw, lh, 'logo'); }
     const tx0 = M + (lw ? lw + 6 : 0), tw = CW - (tx0 - M);
@@ -2488,7 +3094,7 @@ function gerarPDF(v, cfg) {
     y += 7;
   }
 
-  // Capa / identificação
+  // Título / identificação
   font(15, 'bold');
   doc.text(TITULO_PDF[v.tipo], W / 2, y + 6, { align: 'center' });
   y += 11;
@@ -2684,6 +3290,72 @@ function gerarPDF(v, cfg) {
     y += 8;
   }
 
+  // Registro de local e hora: só quando o laudo ou alguma foto tiver localização
+  const fotosComLocal = [];
+  { let k = 0; v.comodos.forEach(c => c.fotos.forEach(f => { k++; const g = coordenadasFoto(f); if (g) fotosComLocal.push({ k, c, f, g }); })); }
+  const regsGeo = (v.geo && v.geo.registros) || [];
+  if (regsGeo.length || fotosComLocal.length) {
+    novaPag();
+    secao(`${n++}. REGISTRO DE LOCAL E HORA`);
+    const MW = 84, X2 = M + MW + 6, W2 = CW - MW - 6;
+    const linhaGeo = (rot, val, cor) => {
+      font(8.5, 'bold'); doc.setTextColor(90); doc.text(rot, X2, y + 3);
+      font(9); if (cor) doc.setTextColor(...cor); else doc.setTextColor(0);
+      const ls = quebrar(val, W2); ls.forEach((l, i) => doc.text(l, X2, y + 7 + i * 4));
+      doc.setTextColor(0);
+      y += 5 + ls.length * 4 + 1;
+    };
+    regsGeo.forEach((r, i) => {
+      const l = r.localizacao || {}, e = r.endereco || {}, h = conferenciaHora(r);
+      const temMapa = r.mapa && r.mapa.dataUrl;
+      const mh = temMapa ? MW * (r.mapa.altura || 400) / (r.mapa.largura || 640) : 0;
+      ensure(Math.max(mh + 8, 70));
+      font(10.5, 'bold'); doc.text(`${r.observacao || 'Registro ' + (i + 1)}`, M, y + 4); y += 7;
+      const y0 = y;
+      if (temMapa) {
+        doc.addImage(r.mapa.dataUrl, 'JPEG', M, y0, MW, mh, 'geo-' + r.id);
+        doc.setDrawColor(190); doc.rect(M, y0, MW, mh);
+        font(7); doc.setTextColor(110); doc.text('Mapa: © colaboradores do OpenStreetMap', M, y0 + mh + 3.5); doc.setTextColor(0);
+      }
+      linhaGeo('Data e hora (aparelho)', fmtGeoHora(r) + (r.horario.fusoIANA ? ` (${r.horario.fusoIANA})` : ''));
+      linhaGeo('Hora', h.txt, h.ok ? [21, 128, 61] : [180, 83, 9]);
+      linhaGeo('Coordenadas', fmtCoord(l.latitude, l.longitude));
+      linhaGeo('Margem de erro', `± ${Math.round(l.precisaoM)} m${l.precisaoBaixa ? ' (precisão baixa)' : ''}`, l.precisaoBaixa ? [180, 83, 9] : null);
+      linhaGeo('Endereço obtido pelo GPS', e.texto ? e.texto + (e.aproximado ? ' (aproximado)' : '') : 'não obtido');
+      font(8.5, 'bold'); doc.setTextColor(90); doc.text('Mapa on-line', X2, y + 3);
+      font(9); doc.setTextColor(29, 78, 216); doc.textWithLink('Abrir o local no Google Maps', X2, y + 7, { url: linkMapa(l.latitude, l.longitude) }); doc.setTextColor(0);
+      y += 10;
+      if (r.hash && r.hash.completo) {
+        font(8.5, 'bold'); doc.setTextColor(90); doc.text('Código de integridade (SHA-256)', X2, y + 3);
+        font(7); doc.setTextColor(60); doc.text(String(r.hash.completo), X2, y + 6.5); doc.setTextColor(0);
+        y += 9;
+      }
+      y = Math.max(y, y0 + mh + 6) + 6;
+    });
+    if (fotosComLocal.length) {
+      ensure(20);
+      para('Fotos com localização', 10, 'bold'); y += 1;
+      const cols = [M, M + 62, M + 100, M + 150];
+      const cabec = ['Foto', 'Origem do local', 'Coordenadas', 'Margem de erro'];
+      font(8.5, 'bold'); doc.setTextColor(90); cabec.forEach((t, i) => doc.text(t, cols[i], y + 3)); doc.setTextColor(0);
+      y += 5; doc.setDrawColor(210); doc.line(M, y, W - M, y); y += 1;
+      fotosComLocal.forEach(({ k, c, f, g }) => {
+        ensure(6);
+        font(8.5);
+        let nome = `Foto ${k} - ${c.nome || 'Cômodo'}`;
+        while (larg(nome) > 60 && nome.length > 8) nome = nome.slice(0, -2);
+        doc.text(nome, cols[0], y + 3.6);
+        doc.text(f.gps ? 'câmera (dados da foto)' : 'aparelho, ao tirar a foto', cols[1], y + 3.6);
+        doc.textWithLink(fmtCoord(g.lat, g.lon), cols[2], y + 3.6, { url: linkMapa(g.lat, g.lon) });
+        doc.text(f.gps ? '-' : `± ${Math.round((f.local && f.local.prec) || 0)} m`, cols[3], y + 3.6);
+        y += 5;
+      });
+      y += 3;
+    }
+    para('A localização e a hora vêm do aparelho de quem elaborou o laudo, que pode ser alterado ou fornecer dados imprecisos (sobretudo em ambientes fechados). O registro é uma declaração acompanhada de indícios técnicos, e não prova absoluta; o código de integridade indica apenas se o registro foi alterado depois de salvo. O local indicado como "aparelho" é o do celular no momento em que a câmera foi aberta pelo aplicativo.', 8, 'italic');
+    y += 4;
+  }
+
   // Declaração e assinaturas
   if (ehAvaliacao(v) || ehOcorrencia(v)) ensure(90); else novaPag();
   if (ehRessalvas(v)) {
@@ -2738,14 +3410,32 @@ function gerarPDF(v, cfg) {
   const slh = 6, slw = logo ? Math.min(30, slh * logo.w / logo.h) : 0; // logo pequeno no cabeçalho (páginas 2+)
   let cab = `${TITULO_CURTO[v.tipo]} - ${enderecoCompleto(v)}`;
   while (doc.getTextWidth(cab) > CW - 25 - slw && cab.length > 10) cab = cab.slice(0, -4) + '...';
+  if (comCapa && sumario.length) {
+    doc.setPage(1);
+    let sy = fimCapa;
+    font(9, 'bold'); doc.setTextColor(100); doc.text('SUMÁRIO', M, sy, { charSpace: 1 }); sy += 5;
+    const lin = Math.min(sumario.length, Math.floor((H - 22 - sy) / 4.6));
+    sumario.slice(0, lin).forEach(e => {
+      font(9); doc.setTextColor(30, 41, 59);
+      let t = `${e.n}. ${e.t.charAt(0) + e.t.slice(1).toLocaleLowerCase('pt-BR')}`;
+      while (larg(t) > CW - 20 && t.length > 10) t = t.slice(0, -2);
+      doc.text(t, M, sy);
+      doc.setTextColor(120); doc.text(String(e.p), W - M, sy, { align: 'right' });
+      doc.setDrawColor(215); doc.setLineDashPattern([0.4, 1], 0); doc.line(M + larg(t) + 2, sy - 0.8, W - M - 6, sy - 0.8); doc.setLineDashPattern([], 0);
+      sy += 4.6;
+    });
+    doc.setTextColor(0);
+  }
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
     font(8); doc.setTextColor(120); doc.setDrawColor(210);
-    doc.text(cab, M, 10);
-    const comLogo = logo && p > 1;
-    if (comLogo) doc.addImage(logo.data, 'PNG', W - M - slw, 11 - slh, slw, slw * logo.h / logo.w, 'logo');
-    doc.text(fmtData(v.data), W - M - (comLogo ? slw + 3 : 0), 10, { align: 'right' });
-    doc.line(M, 12, W - M, 12);
+    if (!(comCapa && p === 1)) {
+      doc.text(cab, M, 10);
+      const comLogo = logo && p > 1;
+      if (comLogo) doc.addImage(logo.data, 'PNG', W - M - slw, 11 - slh, slw, slw * logo.h / logo.w, 'logo');
+      doc.text(fmtData(v.data), W - M - (comLogo ? slw + 3 : 0), 10, { align: 'right' });
+      doc.line(M, 12, W - M, 12);
+    }
     doc.line(M, H - 13, W - M, H - 13);
     doc.text(ehAvaliacao(v) ? 'Rubrica do(a) avaliador(a): ____________________' : ehOcorrencia(v) ? 'Rubrica do(a) vistoriador(a): ____________________' : 'Rubricas: ______________________________', M, H - 8);
     doc.text(`Página ${p} de ${total}`, W - M, H - 8, { align: 'right' });

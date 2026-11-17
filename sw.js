@@ -5,7 +5,7 @@
 // - Bibliotecas, ícones e manifesto: usa a cópia guardada; só busca na internet se faltar.
 //
 // Ao trocar bibliotecas ou ícones, aumente VERSAO para que os aparelhos baixem os arquivos novos.
-const VERSAO = 'v5';
+const VERSAO = 'v6';
 const CACHE = `vistoria-${VERSAO}`;
 const ARQUIVOS = [
   './',
@@ -14,6 +14,8 @@ const ARQUIVOS = [
   'lib/jspdf.umd.min.js',
   'lib/pdf.min.js',
   'lib/pdf.worker.min.js',
+  'lib/georegistro.js',
+  'lib/fontes/inter-latin.woff2',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/icon-maskable-192.png',
