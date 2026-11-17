@@ -1608,7 +1608,7 @@ async function rotear() {
 window.addEventListener('hashchange', rotear);
 
 // ---------- Telas ----------
-const VERSAO_APP = '3.0';
+const VERSAO_APP = '3.1';
 const TITULAR = 'Felippe Alvarez';
 const ANO_INICIO = 2026;
 const desenharEtapas = v => etapasLaudo(v).map(e =>
@@ -3439,6 +3439,9 @@ function gerarPDF(v, cfg) {
     doc.line(M, H - 13, W - M, H - 13);
     doc.text(ehAvaliacao(v) ? 'Rubrica do(a) avaliador(a): ____________________' : ehOcorrencia(v) ? 'Rubrica do(a) vistoriador(a): ____________________' : 'Rubricas: ______________________________', M, H - 8);
     doc.text(`Página ${p} de ${total}`, W - M, H - 8, { align: 'right' });
+    // identificação do aplicativo e direitos autorais, em letra pequena no pé de todas as páginas
+    font(6.5); doc.setTextColor(150);
+    doc.text(`Laudo gerado com o aplicativo Laudar (Vistoria de Imóveis), versão ${VERSAO_APP} · © ${ANO_INICIO}${new Date().getFullYear() > ANO_INICIO ? '–' + new Date().getFullYear() : ''} ${TITULAR}. Todos os direitos reservados.`, W / 2, H - 4, { align: 'center' });
     doc.setTextColor(0);
   }
   return doc;
